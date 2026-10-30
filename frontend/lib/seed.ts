@@ -56,8 +56,35 @@ export const COLORS = ['#3E7BE0', '#1FA095', '#D99211', '#D04F73', '#7C62D9', '#
 export const PLAN_KEY = 'studypilot.v1';
 export const AUTH_KEY = 'studypilot.auth';
 export const THEME_KEY = 'studypilot.theme';
+export const ROLE_KEY = 'studypilot.role';
+
+export function emptyPlan(role: 'student' | 'competitive_exam' | 'professional' = 'competitive_exam'): StudyPlan {
+  const t = today();
+  let defaultRole = role;
+  if (typeof window !== 'undefined') {
+    const savedRole = localStorage.getItem(ROLE_KEY);
+    if (savedRole === 'student' || savedRole === 'competitive_exam' || savedRole === 'professional') {
+      defaultRole = savedRole;
+    }
+  }
+  return {
+    v: 1,
+    role: defaultRole,
+    subjects: [],
+    tasks: [],
+    sessions: [],
+    exam: { name: 'Target Examination', date: addDays(t, 28) },
+    goalMins: 180,
+    settings: { focus: 25, short: 5, long: 15 },
+    sittingCapacityMins: 45
+  };
+}
 
 export function seedPlan(): StudyPlan {
+  return emptyPlan();
+}
+
+export function getSampleDemoPlan(): StudyPlan {
   const t = today();
   const subjects = [
     {

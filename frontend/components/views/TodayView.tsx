@@ -162,6 +162,37 @@ export const TodayView: React.FC<TodayViewProps> = ({
         </div>
       </div>
 
+      {/* Empty Syllabus Upload Callout */}
+      {plan.subjects.length === 0 && (
+        <div
+          style={{
+            padding: '24px 20px',
+            borderRadius: '14px',
+            background: 'linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%)',
+            border: '2px dashed var(--accent)',
+            textAlign: 'center',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '12px'
+          }}
+        >
+          <div style={{ fontSize: '32px' }}>📚</div>
+          <div style={{ maxWidth: '480px' }}>
+            <h3 style={{ fontSize: '18px', margin: '0 0 6px 0' }}>Get Started: Upload Your Syllabus</h3>
+            <p style={{ margin: 0, fontSize: '13px', color: 'var(--muted)' }}>
+              Upload your syllabus in PDF, Excel, or CSV format. StudyPilot will extract your real subjects and topics, schedule your daily study tasks, and prepare subject-wise exam papers without any dummy data.
+            </p>
+          </div>
+          <button
+            className="btn primary sm"
+            onClick={() => onNavigateToView('planner')}
+          >
+            Upload Syllabus in Planner ➡
+          </button>
+        </div>
+      )}
+
       {/* Yesterday's Recall Test Banner */}
       {yesterdayTopics.length > 0 && (
         <div style={{

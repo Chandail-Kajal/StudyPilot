@@ -1,7 +1,16 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { StudyPlan, Task, Subject, User, UserStats } from '@/types';
+import {
+  StudyPlan,
+  Task,
+  Subject,
+  User,
+  UserStats,
+  Exam,
+  SyllabusPreviewResponse,
+  CBTTestSubmitResponse
+} from '@/types';
 import {
   seedPlan,
   today,
@@ -21,13 +30,44 @@ import {
   api
 } from '@/lib/api';
 import { Icon } from '@/components/Icons';
-import { TodayView } from '@/components/views/TodayView';
-import { PlannerView } from '@/components/views/PlannerView';
+
+// View Imports
+import { DashboardView } from '@/components/views/DashboardView';
+import { MyExamsView } from '@/components/views/MyExamsView';
+import { ExamDetailsView } from '@/components/views/ExamDetailsView';
+import { UploadSyllabusView } from '@/components/views/UploadSyllabusView';
+import { SyllabusPreviewView } from '@/components/views/SyllabusPreviewView';
+import { SubjectTopicManageView } from '@/components/views/SubjectTopicManageView';
+import { TopicProgressView } from '@/components/views/TopicProgressView';
+import { StudyPlannerView } from '@/components/views/StudyPlannerView';
+import { SmartRevisionView } from '@/components/views/SmartRevisionView';
+import { MockTestConfigView } from '@/components/views/MockTestConfigView';
+import { TestTakingView } from '@/components/views/TestTakingView';
+import { TestResultsView } from '@/components/views/TestResultsView';
+import { TestHistoryView } from '@/components/views/TestHistoryView';
+import { PerformanceAnalyticsView } from '@/components/views/PerformanceAnalyticsView';
 import { FocusView } from '@/components/views/FocusView';
-import { SubjectsView } from '@/components/views/SubjectsView';
-import { InsightsView } from '@/components/views/InsightsView';
 import { AccountView } from '@/components/views/AccountView';
 import { AIAgentView } from '@/components/views/AIAgentView';
+import { TodayView } from '@/components/views/TodayView';
+import { PlannerView } from '@/components/views/PlannerView';
+import { SubjectsView } from '@/components/views/SubjectsView';
+import { InsightsView } from '@/components/views/InsightsView';
+
+// Upgraded AI Learning, Recovery, PYP & Examination Intelligence Views
+import { AILearningStudioView } from '@/components/views/AILearningStudioView';
+import { SmartRecoveryPlannerView } from '@/components/views/SmartRecoveryPlannerView';
+import { PreviousYearPapersView } from '@/components/views/PreviousYearPapersView';
+import { ExamTrendAnalyzerView } from '@/components/views/ExamTrendAnalyzerView';
+import { AIPredictedPaperView } from '@/components/views/AIPredictedPaperView';
+import { FlashcardsRevisionView } from '@/components/views/FlashcardsRevisionView';
+import { LoginPageView } from '@/components/views/LoginPageView';
+
+// Dedicated Timetable, Scheduled AI Classes & Topic Practice Modules
+import { TimetableScheduleView } from '@/components/views/TimetableScheduleView';
+import { AIClassesScheduleView } from '@/components/views/AIClassesScheduleView';
+import { PracticeView } from '@/components/views/PracticeView';
+
 import {
   AuthModal,
   TaskModal,
@@ -41,14 +81,57 @@ interface ToastItem {
   msg: string;
 }
 
+export type ActiveView =
+  | 'dashboard'
+  | 'exams'
+  | 'exam_details'
+  | 'upload_syllabus'
+  | 'import_preview'
+  | 'manage_syllabus'
+  | 'topic_progress'
+  | 'planner'
+  | 'timetable'
+  | 'ai_classes'
+  | 'practice'
+  | 'smart_revision'
+  | 'mock_config'
+  | 'test_taking'
+  | 'test_results'
+  | 'test_history'
+  | 'analytics'
+  | 'focus'
+  | 'account'
+  | 'ai'
+  | 'today'
+  | 'subjects'
+  | 'insights'
+  | 'ai_learning_studio'
+  | 'smart_recovery'
+  | 'pyp_library'
+  | 'exam_trends'
+  | 'predicted_papers'
+  | 'flashcards';
+
 export default function StudyPilotApp() {
-  // Navigation
-  const [activeView, setActiveView] = useState<'today' | 'planner' | 'focus' | 'subjects' | 'insights' | 'account' | 'ai'>('today');
+  // Navigation State
+  const [activeView, setActiveView] = useState<ActiveView>('dashboard');
   const [weekStart, setWeekStart] = useState<string>(weekStartOf(today()));
   const [subjectFilter, setSubjectFilter] = useState<string>('all');
 
-  // Study Plan Data
+  // Study Plan Data (Local & Sync)
   const [plan, setPlan] = useState<StudyPlan>(seedPlan);
+
+  // Relational Database State
+  const [allExams, setAllExams] = useState<Exam[]>([]);
+  const [activeExam, setActiveExam] = useState<Exam | null>(null);
+  const [previewState, setPreviewState] = useState<{
+    data: SyllabusPreviewResponse;
+    examId: string;
+    fileName: string;
+    fileFormat: string;
+  } | null>(null);
+  const [activeTestId, setActiveTestId] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<CBTTestSubmitResponse | null>(null);
 
   // Authentication & Cloud Sync
   const [user, setUser] = useState<User | null>(null);
@@ -71,6 +154,8 @@ export default function StudyPilotApp() {
   // Modals
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authInitialMode, setAuthInitialMode] = useState<'login' | 'register' | 'forgot'>('login');
+  const [resetTokenPrefill, setResetTokenPrefill] = useState<string>('');
+  const [resetEmailPrefill, setResetEmailPrefill] = useState<string>('');
   const [taskModalOpen, setTaskModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [taskModalDefaultDate, setTaskModalDefaultDate] = useState<string>(today());
@@ -83,8 +168,20 @@ export default function StudyPilotApp() {
   const [isDark, setIsDark] = useState(false);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [selectedTopicForTest, setSelectedTopicForTest] = useState<string | null>(null);
+  const [activeStudioTopicId, setActiveStudioTopicId] = useState<string | null>(null);
+  const [activePracticeTopicId, setActivePracticeTopicId] = useState<string | null>(null);
 
-  // Show toast helper
+  const handleOpenTopicStudio = (topicId: string) => {
+    setActiveStudioTopicId(topicId);
+    navigateTo('ai_learning_studio');
+  };
+
+  const handleOpenPractice = (topicId: string) => {
+    setActivePracticeTopicId(topicId);
+    navigateTo('practice');
+  };
+
+  // Toast Helper
   const showToast = (msg: string) => {
     const id = Math.random().toString(36).slice(2, 9);
     setToasts(prev => [...prev, { id, msg }]);
@@ -93,7 +190,7 @@ export default function StudyPilotApp() {
     }, 2800);
   };
 
-  // Play synthetic chime when timer completes
+  // Sound chime
   const playChime = () => {
     try {
       if (!audioCtxRef.current) {
@@ -120,7 +217,68 @@ export default function StudyPilotApp() {
     } catch (e) {}
   };
 
-  // Save plan & sync with server if logged in
+  // Navigation Switcher (strictly guards private user dashboard and learning data)
+  const navigateTo = (view: string) => {
+    if (!token && !['login', 'register', 'forgot'].includes(view)) {
+      setAuthInitialMode('login');
+      setAuthModalOpen(true);
+      showToast('Please sign in to access your personal dashboard and study records.');
+      return;
+    }
+    setActiveView(view as ActiveView);
+    try {
+      window.history.replaceState(null, '', '#' + view);
+    } catch (e) {}
+    window.scrollTo(0, 0);
+  };
+
+  // Fetch Exams for Current User
+  const fetchExams = async (userToken?: string) => {
+    const t = userToken || token;
+    if (!t) return;
+    try {
+      const res = await api.getExams(t);
+      const list: Exam[] = res.exams || [];
+      setAllExams(list);
+      if (list.length > 0) {
+        setActiveExam(prev => {
+          if (prev) {
+            const match = list.find(e => e.id === prev.id);
+            if (match) return match;
+          }
+          const active = list.find(e => e.status === 'active');
+          return active || list[0];
+        });
+      } else {
+        setActiveExam(null);
+      }
+    } catch (e) {
+      console.error('Failed to fetch exams:', e);
+    }
+  };
+
+  const handleSelectExam = (exam: Exam) => {
+    setActiveExam(exam);
+    fetchExams();
+  };
+
+  // Switch / Quick Login to Demo Accounts
+  const handleQuickLogin = async (email: string) => {
+    try {
+      const res = await api.login({ email, password: 'Password123!' });
+      setToken(res.token);
+      setUser(res.user);
+      setStoredAuth(res.token, res.user);
+      setSyncStatus('synced');
+      showToast(`Switched account to ${res.user.name}`);
+      await fetchExams(res.token);
+      navigateTo('dashboard');
+    } catch (e: any) {
+      showToast(e.message || 'Demo login failed');
+    }
+  };
+
+  // Local storage plan persistence
   const persistPlan = (newPlan: StudyPlan) => {
     setPlan(newPlan);
     setStoredPlan(newPlan);
@@ -152,16 +310,56 @@ export default function StudyPilotApp() {
       }
     } catch (e) {}
 
+    // Detect Password Reset Token in URL (e.g. from reset email link)
+    const checkResetUrl = () => {
+      try {
+        const fullHash = window.location.hash || '';
+        const fullSearch = window.location.search || '';
+        let rToken = '';
+        let rEmail = '';
+
+        if (fullHash.includes('reset-password') || fullHash.includes('token=')) {
+          const qIdx = fullHash.indexOf('?');
+          if (qIdx !== -1) {
+            const params = new URLSearchParams(fullHash.substring(qIdx + 1));
+            rToken = params.get('token') || '';
+            rEmail = params.get('email') || '';
+          }
+        }
+        if (!rToken && fullSearch) {
+          const params = new URLSearchParams(fullSearch);
+          rToken = params.get('token') || params.get('reset_token') || '';
+          rEmail = params.get('email') || '';
+        }
+
+        if (rToken) {
+          setResetTokenPrefill(rToken);
+          if (rEmail) setResetEmailPrefill(rEmail);
+          setAuthInitialMode('forgot');
+          setAuthModalOpen(true);
+        }
+      } catch (e) {}
+    };
+    checkResetUrl();
+
     // Hash route load
-    const hash = window.location.hash.slice(1);
-    if (['today', 'planner', 'focus', 'subjects', 'insights', 'account', 'ai'].includes(hash)) {
-      setActiveView(hash as any);
+    const hash = window.location.hash.split('?')[0].slice(1);
+    const validViews = [
+      'dashboard', 'exams', 'exam_details', 'upload_syllabus', 'import_preview',
+      'manage_syllabus', 'topic_progress', 'planner', 'smart_revision',
+      'mock_config', 'test_taking', 'test_results', 'test_history', 'analytics',
+      'focus', 'account', 'ai', 'today', 'subjects', 'insights',
+      'ai_learning_studio', 'smart_recovery', 'pyp_library', 'exam_trends', 'predicted_papers', 'flashcards'
+    ];
+    if (validViews.includes(hash)) {
+      setActiveView(hash as ActiveView);
     }
 
     const onHashChange = () => {
-      const h = window.location.hash.slice(1);
-      if (['today', 'planner', 'focus', 'subjects', 'insights', 'account', 'ai'].includes(h)) {
-        setActiveView(h as any);
+      checkResetUrl();
+      const h = window.location.hash.split('?')[0].slice(1);
+      if (validViews.includes(h)) {
+        setActiveView(h as ActiveView);
       }
     };
     window.addEventListener('hashchange', onHashChange);
@@ -171,18 +369,15 @@ export default function StudyPilotApp() {
     setPlan(localPlan);
     setTimerTotal(localPlan.settings.focus * 60);
     setTimerRemaining(localPlan.settings.focus * 60);
-    if (localPlan.subjects.length > 0) {
-      setTimerSubjectId(localPlan.subjects[0].id);
-    }
 
-    // Check auth session
+    // Authentication session verification:
+    // Only load user dashboard and exams if a valid session token exists.
+    // Unauthenticated visitors do NOT auto-login, ensuring strict user privacy.
     const storedAuth = getStoredAuth();
     if (storedAuth && storedAuth.token) {
       setToken(storedAuth.token);
       setUser(storedAuth.user);
-      setSyncStatus('syncing');
-
-      // Refresh user profile & sync plan from server
+      fetchExams(storedAuth.token);
       api.getMe(storedAuth.token)
         .then(res => {
           setUser(res.user);
@@ -198,8 +393,17 @@ export default function StudyPilotApp() {
           }
         })
         .catch(() => {
+          // Token expired or invalid
+          clearStoredAuth();
+          setToken(null);
+          setUser(null);
           setSyncStatus('local');
         });
+    } else {
+      setToken(null);
+      setUser(null);
+      setAllExams([]);
+      setActiveExam(null);
     }
 
     return () => window.removeEventListener('hashchange', onHashChange);
@@ -226,7 +430,6 @@ export default function StudyPilotApp() {
           clearInterval(interval);
           setTimerRunning(false);
 
-          // Session complete
           playChime();
           if (timerMode === 'focus') {
             const focusMins = plan.settings.focus;
@@ -264,15 +467,6 @@ export default function StudyPilotApp() {
     try {
       localStorage.setItem(THEME_KEY, themeStr);
     } catch (e) {}
-  };
-
-  // Switch navigation view
-  const navigateTo = (view: 'today' | 'planner' | 'focus' | 'subjects' | 'insights' | 'account' | 'ai') => {
-    setActiveView(view);
-    try {
-      window.history.replaceState(null, '', '#' + view);
-    } catch (e) {}
-    window.scrollTo(0, 0);
   };
 
   // Timer Controls
@@ -342,7 +536,7 @@ export default function StudyPilotApp() {
     }
   };
 
-  // Task Handlers
+  // Task Handlers (Legacy plan)
   const handleToggleTask = (taskId: string) => {
     const newTasks = plan.tasks.map(t =>
       t.id === taskId ? { ...t, done: !t.done } : t
@@ -401,7 +595,6 @@ export default function StudyPilotApp() {
     showToast(`Task rescheduled to ${newDate}`);
   };
 
-  // Spaced Repetition Topic Review
   const handleReviewTopic = (subjectId: string, topicId: string) => {
     const newSubjects = plan.subjects.map(s => {
       if (s.id !== subjectId) return s;
@@ -422,7 +615,6 @@ export default function StudyPilotApp() {
     showToast('Topic reviewed and moved up the spaced revision ladder!');
   };
 
-  // Subject Handlers
   const handleAddSubject = (name: string, color: string) => {
     const newSubject: Subject = {
       id: Math.random().toString(36).slice(2, 9),
@@ -452,7 +644,7 @@ export default function StudyPilotApp() {
       return { ...s, topics: [...s.topics, newTopic] };
     });
     persistPlan({ ...plan, subjects: newSubjects });
-    showToast(`${name} added to syllabus`);
+    showToast(`${name} added to topic list`);
   };
 
   const handleDeleteTopic = (subjectId: string, topicId: string) => {
@@ -461,42 +653,41 @@ export default function StudyPilotApp() {
       return { ...s, topics: s.topics.filter(t => t.id !== topicId) };
     });
     persistPlan({ ...plan, subjects: newSubjects });
-    showToast('Topic removed');
+    showToast('Topic deleted');
   };
 
-  // AI Schedule Application & Test Adjustments
   const handleApplyAITasks = (newTasks: Task[], sittingCapacity?: number) => {
-    const completedTasks = plan.tasks.filter(t => t.done);
-    const updatedPlan: StudyPlan = {
+    const updated = [...plan.tasks, ...newTasks];
+    persistPlan({
       ...plan,
-      sittingCapacityMins: sittingCapacity || plan.sittingCapacityMins || 45,
-      tasks: [...completedTasks, ...newTasks]
-    };
-    persistPlan(updatedPlan);
-    showToast(`Applied ${newTasks.length} AI-scheduled tasks to your planner!`);
+      tasks: updated,
+      ...(sittingCapacity ? { sittingCapacityMins: sittingCapacity } : {})
+    });
+    showToast(`Applied ${newTasks.length} scheduled tasks to your study planner`);
   };
 
-  const handleUpdateTopicStageFromTest = (topicName: string, advance: boolean) => {
-    const updatedSubjects = plan.subjects.map(s => {
-      const updatedTopics = s.topics.map(tp => {
-        if (tp.name.toLowerCase() === topicName.toLowerCase() || topicName.toLowerCase().includes(tp.name.toLowerCase())) {
-          const newStage = advance ? Math.min(5, tp.stage + 1) : Math.max(1, tp.stage - 1);
-          const intervalDays = INTERVALS[Math.min(newStage, 5) - 1];
-          return {
-            ...tp,
-            stage: newStage,
-            next: addDays(today(), intervalDays)
-          };
-        }
-        return tp;
-      });
-      return { ...s, topics: updatedTopics };
+  const handleUpdateTopicStageFromTest = (topicName: string, passed: boolean) => {
+    let found = false;
+    const updatedSubjects = plan.subjects.map(subj => {
+      const topicIndex = subj.topics.findIndex(t => t.name.toLowerCase().includes(topicName.toLowerCase()) || topicName.toLowerCase().includes(t.name.toLowerCase()));
+      if (topicIndex !== -1) {
+        found = true;
+        const topic = subj.topics[topicIndex];
+        const newStage = passed ? Math.min(5, topic.stage + 1) : Math.max(0, topic.stage - 1);
+        const intervalDays = INTERVALS[Math.min(newStage, 5) - 1] || 1;
+        const newNext = addDays(today(), intervalDays);
+
+        const updatedTopics = [...subj.topics];
+        updatedTopics[topicIndex] = { ...topic, stage: newStage, next: newNext };
+        return { ...subj, topics: updatedTopics };
+      }
+      return subj;
     });
 
-    let updatedTasks = [...plan.tasks];
-    if (!advance) {
+    const updatedTasks = [...plan.tasks];
+    if (!passed) {
       const tomorrow = addDays(today(), 1);
-      const subj = plan.subjects.find(s => s.topics.some(tp => tp.name.toLowerCase() === topicName.toLowerCase()));
+      const subj = plan.subjects.find(s => s.topics.some(t => t.name.toLowerCase().includes(topicName.toLowerCase())));
       updatedTasks.unshift({
         id: Math.random().toString(36).slice(2, 9),
         title: `Reinforcement drill: ${topicName}`,
@@ -515,7 +706,6 @@ export default function StudyPilotApp() {
     });
   };
 
-  // Settings & Reset
   const handleSaveSettings = (exam: { name: string; date: string }, goalMins: number, settings: { focus: number; short: number; long: number }) => {
     const updatedPlan = {
       ...plan,
@@ -539,65 +729,53 @@ export default function StudyPilotApp() {
     showToast('Sample prototype data restored');
   };
 
-  // Authentication Handlers
+  // Auth Handlers
   const handleLogin = async (credentials: { email: string; password: string }) => {
     const res = await api.login(credentials);
     setToken(res.token);
     setUser(res.user);
     setStoredAuth(res.token, res.user);
-
     if (res.plan) {
       setPlan(res.plan);
       setStoredPlan(res.plan);
     }
     setSyncStatus('synced');
     showToast(res.message || `Welcome back, ${res.user.name}!`);
+    await fetchExams(res.token);
+    navigateTo('dashboard');
   };
 
-  const handleRegister = async (data: {
-    name: string;
-    email: string;
-    password: string;
-    exam_name?: string;
-    exam_date?: string;
-    goal_mins?: number;
-    importCurrentPlan?: boolean;
-  }) => {
-    const payload: any = {
-      name: data.name,
-      email: data.email,
-      password: data.password,
-      exam_name: data.exam_name,
-      exam_date: data.exam_date,
-      goal_mins: data.goal_mins
-    };
-
-    if (data.importCurrentPlan) {
-      payload.prototype_data = plan;
-    }
-
-    const res = await api.register(payload);
+  const handleRegister = async (data: any) => {
+    const res = await api.register(data);
     setToken(res.token);
     setUser(res.user);
     setStoredAuth(res.token, res.user);
-
     if (res.plan) {
       setPlan(res.plan);
       setStoredPlan(res.plan);
     }
     setSyncStatus('synced');
     showToast(res.message || 'Account created successfully!');
+    await fetchExams(res.token);
+    navigateTo('dashboard');
   };
 
   const handleForgotPassword = async (email: string) => {
     const res = await api.forgotPassword(email);
-    showToast('Password reset code generated');
-    return res.reset_token;
+    showToast(res.message || 'Password reset link sent to your registered email.');
+    return res;
   };
 
   const handleResetPassword = async (tokenStr: string, newPassword: string) => {
     await api.resetPassword(tokenStr, newPassword);
-    showToast('Password reset successfully. You can now log in.');
+    showToast('Password reset successfully. You can now sign in with your new password.');
+    setResetTokenPrefill('');
+    setResetEmailPrefill('');
+    if (typeof window !== 'undefined') {
+      try {
+        window.history.replaceState(null, '', window.location.pathname);
+      } catch (e) {}
+    }
   };
 
   const handleSignOut = () => {
@@ -608,11 +786,14 @@ export default function StudyPilotApp() {
     setToken(null);
     setUser(null);
     setUserStats(null);
+    setAllExams([]);
+    setActiveExam(null);
+    setPlan(seedPlan());
     setSyncStatus('local');
+    setActiveView('dashboard');
     showToast('Signed out successfully');
   };
 
-  // Cloud Sync Manual Trigger
   const handleSyncNow = async () => {
     if (!token) return;
     setSyncStatus('syncing');
@@ -627,7 +808,6 @@ export default function StudyPilotApp() {
     }
   };
 
-  // Prototype Data Import (Deliverable #3)
   const handleImportPrototype = async () => {
     if (!token) return;
     try {
@@ -644,7 +824,6 @@ export default function StudyPilotApp() {
     }
   };
 
-  // Data Export (Deliverable #6)
   const handleExportData = () => {
     const exportObject = {
       application: 'StudyPilot',
@@ -670,9 +849,7 @@ export default function StudyPilotApp() {
   };
 
   const handleExportCSV = () => {
-    const rows = [
-      ['Session ID', 'Date', 'Subject', 'Minutes', 'Timestamp']
-    ];
+    const rows = [['Session ID', 'Date', 'Subject', 'Minutes', 'Timestamp']];
     plan.sessions.forEach(s => {
       const subj = plan.subjects.find(sub => sub.id === s.subjectId);
       rows.push([
@@ -698,35 +875,9 @@ export default function StudyPilotApp() {
   };
 
   const handleUpdateProfile = async (updates: Partial<User>) => {
-    if (!token) {
-      // Local update
-      const updatedPlan = {
-        ...plan,
-        exam: {
-          name: updates.exam_name || plan.exam.name,
-          date: updates.exam_date || plan.exam.date
-        },
-        goalMins: updates.goal_mins || plan.goalMins,
-        settings: updates.settings || plan.settings
-      };
-      persistPlan(updatedPlan);
-      showToast('Settings saved locally');
-      return;
-    }
-
+    if (!token) return;
     const res = await api.updateProfile(token, updates);
     setUser(res.user);
-    if (updates.exam_name || updates.exam_date || updates.goal_mins || updates.settings) {
-      setPlan(prev => ({
-        ...prev,
-        exam: {
-          name: updates.exam_name || prev.exam.name,
-          date: updates.exam_date || prev.exam.date
-        },
-        goalMins: updates.goal_mins || prev.goalMins,
-        settings: updates.settings || prev.settings
-      }));
-    }
     showToast('Account preferences updated');
   };
 
@@ -739,13 +890,6 @@ export default function StudyPilotApp() {
     showToast('Password changed successfully');
   };
 
-  // Nav Counts
-  const todayRemainingTasks = plan.tasks.filter(t => t.date === today() && !t.done).length;
-  const todayDueTopics = plan.subjects.reduce(
-    (acc, s) => acc + s.topics.filter(t => t.next <= today()).length,
-    0
-  );
-
   const padNum = (n: number) => String(n).padStart(2, '0');
   const timerMMSS = `${padNum(Math.floor(timerRemaining / 60))}:${padNum(timerRemaining % 60)}`;
 
@@ -756,103 +900,210 @@ export default function StudyPilotApp() {
     return (parts[0][0] + parts[1][0]).toUpperCase();
   };
 
+  // Without login, do not show sidebar and dashboard! Show dedicated interactive Login page.
+  if (!token || !user) {
+    return (
+      <LoginPageView
+        onLogin={handleLogin}
+        onRegister={handleRegister}
+        onForgotPassword={handleForgotPassword}
+        onResetPassword={handleResetPassword}
+        prefillToken={resetTokenPrefill}
+        prefillEmail={resetEmailPrefill}
+        isDark={isDark}
+        toggleTheme={toggleTheme}
+        toasts={toasts}
+      />
+    );
+  }
+
   return (
     <div className="app-container">
-      {/* Left Navigation Rail (Desktop) / Bottom Nav (Mobile) */}
+      {/* Navigation Sidebar */}
       <aside className="side-nav" aria-label="Main Navigation">
-        <div className="brand">
+        {/* Brand */}
+        <div className="brand" onClick={() => navigateTo('dashboard')} style={{ cursor: 'pointer' }}>
           <span className="mark" aria-hidden="true">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
               <path d="M3 11.2 21 3l-4.6 18-4.2-7.1z" />
             </svg>
           </span>
-          StudyPilot
+          <span>StudyPilot AI</span>
         </div>
 
-        <button
-          className="navbtn"
-          aria-current={activeView === 'today' ? 'page' : undefined}
-          onClick={() => navigateTo('today')}
-        >
-          <Icon name="today" size={20} />
-          <span>Today</span>
-        </button>
+        {/* Active Exam Mini-Card */}
+        {user && activeExam ? (
+          <div className="p-3 mx-1 my-2 rounded-xl bg-slate-900/60 border border-slate-800 text-left">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-primary">Active Exam</span>
+              <button
+                onClick={() => navigateTo('exams')}
+                className="text-[10px] text-muted hover:text-white transition-colors"
+                title="Change Exam"
+              >
+                Switch
+              </button>
+            </div>
+            <div className="text-xs font-bold text-slate-100 truncate">{activeExam.exam_name}</div>
+            <div className="text-[11px] text-muted capitalize mt-0.5">{activeExam.exam_category}</div>
+          </div>
+        ) : user ? (
+          <div className="p-2.5 mx-1 my-2 rounded-xl bg-slate-900/40 border border-dashed border-slate-800 text-center">
+            <button onClick={() => navigateTo('exams')} className="text-xs text-primary font-semibold hover:underline">
+              + Select / Add Exam
+            </button>
+          </div>
+        ) : (
+          <div className="p-2.5 mx-1 my-2 rounded-xl bg-slate-900/40 border border-dashed border-slate-800 text-center">
+            <button
+              onClick={() => {
+                setAuthInitialMode('login');
+                setAuthModalOpen(true);
+              }}
+              className="text-xs text-primary font-semibold hover:underline flex items-center justify-center gap-1.5 w-full"
+            >
+              <span>🔒</span>
+              <span>Sign In to Access</span>
+            </button>
+          </div>
+        )}
 
-        <button
-          className="navbtn"
-          aria-current={activeView === 'planner' ? 'page' : undefined}
-          onClick={() => navigateTo('planner')}
-        >
-          <Icon name="planner" size={20} />
-          <span>Planner</span>
-        </button>
+        {/* Navigation Categories */}
+        <div className="flex-1 overflow-y-auto space-y-3 py-2">
+          {/* 1. Dashboard */}
+          <div>
+            <button
+              className="navbtn"
+              aria-current={activeView === 'dashboard' ? 'page' : undefined}
+              onClick={() => navigateTo('dashboard')}
+            >
+              <Icon name="home" size={18} />
+              <span>Dashboard</span>
+            </button>
 
-        <button
-          className="navbtn"
-          aria-current={activeView === 'focus' ? 'page' : undefined}
-          onClick={() => navigateTo('focus')}
-        >
-          <Icon name="focus" size={20} />
-          <span>Focus</span>
-        </button>
+            {/* 2. My Examinations */}
+            <button
+              className="navbtn"
+              aria-current={activeView === 'exams' || activeView === 'exam_details' ? 'page' : undefined}
+              onClick={() => navigateTo('exams')}
+            >
+              <Icon name="award" size={18} />
+              <span>My Examinations</span>
+              {allExams.length > 0 && (
+                <span className="badge badge-outline text-[10px] ml-auto">{allExams.length}</span>
+              )}
+            </button>
 
-        <button
-          className="navbtn"
-          aria-current={activeView === 'subjects' ? 'page' : undefined}
-          onClick={() => navigateTo('subjects')}
-        >
-          <Icon name="subjects" size={20} />
-          <span>Subjects</span>
-        </button>
+            {/* 3. Study Planner */}
+            <button
+              className="navbtn"
+              aria-current={activeView === 'planner' || activeView === 'smart_recovery' ? 'page' : undefined}
+              onClick={() => navigateTo('planner')}
+            >
+              <Icon name="calendar" size={18} />
+              <span>Study Planner</span>
+            </button>
 
-        <button
-          className="navbtn"
-          aria-current={activeView === 'insights' ? 'page' : undefined}
-          onClick={() => navigateTo('insights')}
-        >
-          <Icon name="insights" size={20} />
-          <span>Insights</span>
-        </button>
+            {/* 4. Timetable */}
+            <button
+              className="navbtn"
+              aria-current={activeView === 'timetable' ? 'page' : undefined}
+              onClick={() => navigateTo('timetable')}
+            >
+              <Icon name="clock" size={18} />
+              <span className="font-semibold">Timetable</span>
+              <span className="badge badge-primary text-[10px] ml-auto">Daily/Weekly</span>
+            </button>
 
-        <button
-          className="navbtn"
-          aria-current={activeView === 'account' ? 'page' : undefined}
-          onClick={() => navigateTo('account')}
-        >
-          <Icon name="user" size={20} />
-          <span>My Account</span>
-        </button>
+            {/* 5. AI Classes */}
+            <button
+              className="navbtn"
+              aria-current={activeView === 'ai_classes' || activeView === 'ai_learning_studio' ? 'page' : undefined}
+              onClick={() => navigateTo('ai_classes')}
+            >
+              <Icon name="sparkles" size={18} />
+              <span className="font-semibold">AI Classes</span>
+              <span className="badge badge-primary text-[10px] ml-auto">Live Studio</span>
+            </button>
 
-        <button
-          className="navbtn"
-          aria-current={activeView === 'ai' ? 'page' : undefined}
-          onClick={() => navigateTo('ai')}
-          style={{
-            background: activeView === 'ai' ? 'var(--accent-soft)' : undefined,
-            color: activeView === 'ai' ? 'var(--accent)' : undefined,
-            border: '1px solid var(--accent)',
-            marginTop: '4px'
-          }}
-        >
-          <Icon name="sparkles" size={20} />
-          <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-            <span>AI & Tests</span>
-            {getYesterdayTopics(plan).length > 0 && (
-              <span className="pill good" style={{ fontSize: '10px', padding: '2px 6px', fontWeight: 700 }}>
-                Test Ready
-              </span>
-            )}
-          </span>
-        </button>
+            {/* 6. Subjects & Syllabus */}
+            <button
+              className="navbtn"
+              aria-current={activeView === 'manage_syllabus' || activeView === 'upload_syllabus' || activeView === 'import_preview' || activeView === 'topic_progress' ? 'page' : undefined}
+              onClick={() => navigateTo('manage_syllabus')}
+            >
+              <Icon name="layers" size={18} />
+              <span>Subjects & Syllabus</span>
+              {previewState && (
+                <span className="badge badge-warning text-[10px] ml-auto">Pending</span>
+              )}
+            </button>
 
-        <div className="navnote">
-          <b>Today</b>
-          {todayRemainingTasks} task{todayRemainingTasks === 1 ? '' : 's'} left
-          <br />
-          {todayDueTopics} revision{todayDueTopics === 1 ? '' : 's'} due
+            {/* 7. Practice & Assessments */}
+            <button
+              className="navbtn"
+              aria-current={activeView === 'practice' || activeView === 'flashcards' ? 'page' : undefined}
+              onClick={() => navigateTo('practice')}
+            >
+              <Icon name="check-circle" size={18} />
+              <span>Practice & Assessments</span>
+            </button>
+
+            {/* 8. Mock Tests */}
+            <button
+              className="navbtn"
+              aria-current={activeView === 'mock_config' || activeView === 'test_taking' || activeView === 'test_results' || activeView === 'test_history' ? 'page' : undefined}
+              onClick={() => navigateTo('mock_config')}
+            >
+              <Icon name="play" size={18} />
+              <span>Mock Tests</span>
+              <span className="badge badge-outline text-[10px] ml-auto">CBT</span>
+            </button>
+
+            {/* 9. Previous-Year Papers */}
+            <button
+              className="navbtn"
+              aria-current={activeView === 'pyp_library' || activeView === 'exam_trends' || activeView === 'predicted_papers' ? 'page' : undefined}
+              onClick={() => navigateTo('pyp_library')}
+            >
+              <Icon name="file-text" size={18} />
+              <span>Previous-Year Papers</span>
+            </button>
+
+            {/* 10. Progress & Analytics */}
+            <button
+              className="navbtn"
+              aria-current={activeView === 'analytics' ? 'page' : undefined}
+              onClick={() => navigateTo('analytics')}
+            >
+              <Icon name="bar-chart" size={18} />
+              <span>Progress & Analytics</span>
+            </button>
+
+            {/* 11. AI Study Assistant */}
+            <button
+              className="navbtn"
+              aria-current={activeView === 'ai' ? 'page' : undefined}
+              onClick={() => navigateTo('ai')}
+            >
+              <Icon name="sparkles" size={18} />
+              <span>AI Study Assistant</span>
+            </button>
+
+            {/* 12. Profile & Settings */}
+            <button
+              className="navbtn"
+              aria-current={activeView === 'account' ? 'page' : undefined}
+              onClick={() => navigateTo('account')}
+            >
+              <Icon name="user" size={18} />
+              <span>Profile & Settings</span>
+            </button>
+          </div>
         </div>
 
-        <div className="cloud-status-badge">
+        {/* Cloud Sync Status */}
+        <div className="cloud-status-badge mt-auto">
           <span
             style={{
               width: '8px',
@@ -860,8 +1111,8 @@ export default function StudyPilotApp() {
               borderRadius: '50%',
               background: syncStatus === 'synced' ? 'var(--good)' : syncStatus === 'syncing' ? 'var(--amber)' : 'var(--muted)'
             }}
-          ></span>
-          <span>{syncStatus === 'synced' ? 'Cloud Synced' : syncStatus === 'syncing' ? 'Syncing...' : 'Local Browser'}</span>
+          />
+          <span>{syncStatus === 'synced' ? 'Database Connected' : syncStatus === 'syncing' ? 'Syncing...' : 'Local'}</span>
         </div>
       </aside>
 
@@ -888,6 +1139,27 @@ export default function StudyPilotApp() {
               <Icon name="play" size={13} />
               <span>{timerMode === 'focus' ? 'Focus ' : 'Break '}{timerMMSS}</span>
             </button>
+          )}
+
+          {/* Active Exam Selector in Header */}
+          {allExams.length > 0 && (
+            <div className="hidden sm:flex items-center gap-2">
+              <span className="text-xs text-muted font-medium">Exam:</span>
+              <select
+                value={activeExam?.id || ''}
+                onChange={(e) => {
+                  const selected = allExams.find(ex => ex.id === e.target.value);
+                  if (selected) setActiveExam(selected);
+                }}
+                className="text-xs font-semibold bg-slate-900 border border-slate-700 rounded-lg py-1 px-2.5 text-slate-200"
+              >
+                {allExams.map(ex => (
+                  <option key={ex.id} value={ex.id}>
+                    {ex.exam_name}
+                  </option>
+                ))}
+              </select>
+            </div>
           )}
 
           {/* Theme switcher */}
@@ -924,7 +1196,7 @@ export default function StudyPilotApp() {
             </button>
           ) : (
             <button
-              className="btn primary sm"
+              className="btn btn-primary btn-sm"
               onClick={() => {
                 setAuthInitialMode('login');
                 setAuthModalOpen(true);
@@ -935,7 +1207,360 @@ export default function StudyPilotApp() {
           )}
         </header>
 
-        {/* Dynamic Views */}
+        {/* Dynamic Views: Authenticated User Workspace */}
+        {activeView === 'dashboard' && (
+              <DashboardView
+                user={user}
+                token={token}
+                activeExam={activeExam}
+                allExams={allExams}
+                onSelectExam={handleSelectExam}
+                onNavigate={navigateTo}
+                showToast={showToast}
+                onQuickLogin={handleQuickLogin}
+                onOpenTopicInStudio={handleOpenTopicStudio}
+                onPreviewExtracted={(data, examId, fileName, fileFormat) => {
+                  setPreviewState({ data, examId, fileName, fileFormat });
+                  navigateTo('import_preview');
+                }}
+              />
+            )}
+
+        {activeView === 'exams' && (
+          <MyExamsView
+            token={token}
+            activeExam={activeExam}
+            onSelectExam={handleSelectExam}
+            onNavigate={navigateTo}
+            showToast={showToast}
+            onPreviewExtracted={(data, examId, fileName, fileFormat) => {
+              setPreviewState({ data, examId, fileName, fileFormat });
+              navigateTo('import_preview');
+            }}
+          />
+        )}
+
+        {activeView === 'exam_details' && (
+          <ExamDetailsView
+            token={token}
+            exam={activeExam}
+            onNavigate={navigateTo}
+            showToast={showToast}
+          />
+        )}
+
+        {activeView === 'upload_syllabus' && (
+          <UploadSyllabusView
+            token={token}
+            activeExam={activeExam}
+            allExams={allExams}
+            onSelectExam={handleSelectExam}
+            onPreviewExtracted={(data, examId, fileName, fileFormat) => {
+              setPreviewState({ data, examId, fileName, fileFormat });
+              navigateTo('import_preview');
+            }}
+            onNavigate={navigateTo}
+            showToast={showToast}
+          />
+        )}
+
+        {activeView === 'import_preview' && (
+          <SyllabusPreviewView
+            token={token}
+            previewData={previewState?.data || null}
+            examId={previewState?.examId || activeExam?.id || ''}
+            fileName={previewState?.fileName || 'syllabus'}
+            fileFormat={previewState?.fileFormat || 'csv'}
+            onImportConfirmed={(newPlan?: any) => {
+              setPreviewState(null);
+              fetchExams();
+              if (newPlan) {
+                setPlan(newPlan);
+                setStoredPlan(newPlan);
+              } else if (token) {
+                api.getSyncPlan(token).then(syncRes => {
+                  if (syncRes && syncRes.plan) {
+                    setPlan(syncRes.plan);
+                    setStoredPlan(syncRes.plan);
+                  }
+                }).catch(() => {});
+              }
+              navigateTo('planner');
+            }}
+            onNavigate={navigateTo}
+            showToast={showToast}
+          />
+        )}
+
+        {activeView === 'manage_syllabus' && (
+          <SubjectTopicManageView
+            token={token}
+            activeExam={activeExam}
+            onNavigate={navigateTo}
+            showToast={showToast}
+            onOpenTopicStudio={handleOpenTopicStudio}
+          />
+        )}
+
+        {activeView === 'topic_progress' && (
+          <TopicProgressView
+            token={token}
+            activeExam={activeExam}
+            onNavigate={navigateTo}
+            showToast={showToast}
+            onOpenTopicStudio={handleOpenTopicStudio}
+          />
+        )}
+
+        {activeView === 'ai_learning_studio' && (
+          <AILearningStudioView
+            token={token}
+            activeExam={activeExam}
+            topicId={activeStudioTopicId}
+            onNavigate={navigateTo}
+            showToast={showToast}
+            onOpenPracticeForTopic={(topicId) => {
+              setActiveStudioTopicId(topicId);
+            }}
+          />
+        )}
+
+        {activeView === 'flashcards' && (
+          <FlashcardsRevisionView
+            token={token}
+            activeExam={activeExam}
+            onNavigate={navigateTo}
+            showToast={showToast}
+            onOpenTopicInStudio={handleOpenTopicStudio}
+          />
+        )}
+
+        {activeView === 'planner' && (
+          <StudyPlannerView
+            token={token}
+            activeExam={activeExam}
+            onNavigate={navigateTo}
+            showToast={showToast}
+            onStartFocusSession={(mins, subjectName) => {
+              setTimerMode('focus');
+              setTimerTotal(mins * 60);
+              setTimerRemaining(mins * 60);
+              navigateTo('focus');
+            }}
+            onOpenTopicStudio={handleOpenTopicStudio}
+          />
+        )}
+
+        {activeView === 'timetable' && (
+          <TimetableScheduleView
+            token={token}
+            activeExam={activeExam}
+            onNavigate={navigateTo}
+            showToast={showToast}
+            onOpenTopicStudio={handleOpenTopicStudio}
+            onLaunchPractice={handleOpenPractice}
+            onLaunchTest={(testId) => {
+              if (testId) setActiveTestId(testId);
+              navigateTo('mock_config');
+            }}
+          />
+        )}
+
+        {activeView === 'ai_classes' && (
+          <AIClassesScheduleView
+            token={token}
+            activeExam={activeExam}
+            onNavigate={navigateTo}
+            showToast={showToast}
+            onOpenClassInStudio={handleOpenTopicStudio}
+          />
+        )}
+
+        {activeView === 'practice' && (
+          <PracticeView
+            token={token}
+            activeExam={activeExam}
+            initialTopicId={activePracticeTopicId}
+            onNavigate={navigateTo}
+            showToast={showToast}
+            onOpenTopicInStudio={handleOpenTopicStudio}
+          />
+        )}
+
+        {activeView === 'smart_recovery' && (
+          <SmartRecoveryPlannerView
+            token={token}
+            activeExam={activeExam}
+            onNavigate={navigateTo}
+            showToast={showToast}
+          />
+        )}
+
+        {activeView === 'pyp_library' && (
+          <PreviousYearPapersView
+            token={token}
+            activeExam={activeExam}
+            onNavigate={navigateTo}
+            showToast={showToast}
+            onLaunchPaperTest={(paper, mode) => {
+              showToast(`Launching ${paper.title} (${mode} mode)`);
+            }}
+          />
+        )}
+
+        {activeView === 'exam_trends' && (
+          <ExamTrendAnalyzerView
+            token={token}
+            activeExam={activeExam}
+            onNavigate={navigateTo}
+            showToast={showToast}
+            onOpenTopicInStudio={handleOpenTopicStudio}
+          />
+        )}
+
+        {activeView === 'predicted_papers' && (
+          <AIPredictedPaperView
+            token={token}
+            activeExam={activeExam}
+            onNavigate={navigateTo}
+            showToast={showToast}
+          />
+        )}
+
+        {activeView === 'smart_revision' && (
+          <SmartRevisionView
+            token={token}
+            activeExam={activeExam}
+            onNavigate={navigateTo}
+            showToast={showToast}
+          />
+        )}
+
+        {activeView === 'mock_config' && (
+          <MockTestConfigView
+            token={token}
+            activeExam={activeExam}
+            onLaunchTest={(testId) => {
+              setActiveTestId(testId);
+              navigateTo('test_taking');
+            }}
+            onNavigate={navigateTo}
+            showToast={showToast}
+          />
+        )}
+
+        {activeView === 'test_taking' && (
+          <TestTakingView
+            token={token}
+            testId={activeTestId || ''}
+            onFinishTest={(result) => {
+              setTestResult(result);
+              navigateTo('test_results');
+            }}
+            onExit={() => navigateTo('mock_config')}
+            showToast={showToast}
+          />
+        )}
+
+        {activeView === 'test_results' && (
+          <TestResultsView
+            result={testResult}
+            activeExam={activeExam}
+            onNavigate={navigateTo}
+            onRetakeTest={() => navigateTo('mock_config')}
+          />
+        )}
+
+        {activeView === 'test_history' && (
+          <TestHistoryView
+            token={token}
+            activeExam={activeExam}
+            onNavigate={navigateTo}
+            showToast={showToast}
+            onSelectAttemptReview={(result) => {
+              setTestResult(result);
+              navigateTo('test_results');
+            }}
+          />
+        )}
+
+        {activeView === 'analytics' && (
+          <PerformanceAnalyticsView
+            token={token}
+            activeExam={activeExam}
+            onNavigate={navigateTo}
+            showToast={showToast}
+          />
+        )}
+
+        {activeView === 'focus' && (
+          <FocusView
+            plan={plan}
+            timerMode={timerMode}
+            timerRemaining={timerRemaining}
+            timerTotal={timerTotal}
+            timerRunning={timerRunning}
+            timerCycles={timerCycles}
+            timerTaskId={timerTaskId}
+            timerSubjectId={timerSubjectId}
+            onSetMode={(mode) => {
+              if (!timerRunning) {
+                setTimerMode(mode);
+                const secs = plan.settings[mode] * 60;
+                setTimerTotal(secs);
+                setTimerRemaining(secs);
+              }
+            }}
+            onToggleTimer={toggleTimer}
+            onResetTimer={resetTimer}
+            onLogTimer={handleLogTimerManual}
+            onSkipTimerDemo={handleSkipTimerDemo}
+            onSelectTask={(taskId) => {
+              setTimerTaskId(taskId);
+              const task = plan.tasks.find(t => t.id === taskId);
+              if (task && task.subjectId) {
+                setTimerSubjectId(task.subjectId);
+              }
+            }}
+            onSelectSubject={setTimerSubjectId}
+          />
+        )}
+
+        {activeView === 'account' && (
+          <AccountView
+            user={user}
+            stats={userStats}
+            plan={plan}
+            isAuthenticated={Boolean(user)}
+            syncStatus={syncStatus}
+            lastSyncedTime={lastSyncedTime}
+            onSyncNow={handleSyncNow}
+            onImportPrototype={handleImportPrototype}
+            onExportData={handleExportData}
+            onExportCSV={handleExportCSV}
+            onUpdateProfile={handleUpdateProfile}
+            onChangePassword={handleChangePassword}
+            onSignOut={handleSignOut}
+            onOpenAuth={() => {
+              setAuthInitialMode('login');
+              setAuthModalOpen(true);
+            }}
+            onResetData={handleResetData}
+          />
+        )}
+
+        {activeView === 'ai' && (
+          <AIAgentView
+            plan={plan}
+            token={token}
+            onApplyPlanTasks={handleApplyAITasks}
+            onUpdateTopicStage={handleUpdateTopicStageFromTest}
+            onNavigateToView={(view) => navigateTo(view as any)}
+            showToast={showToast}
+            initialTopicForTest={selectedTopicForTest}
+          />
+        )}
+
         {activeView === 'today' && (
           <TodayView
             plan={plan}
@@ -974,65 +1599,6 @@ export default function StudyPilotApp() {
           />
         )}
 
-        {activeView === 'planner' && (
-          <PlannerView
-            plan={plan}
-            weekStart={weekStart}
-            subjectFilter={subjectFilter}
-            onFilterChange={setSubjectFilter}
-            onWeekChange={setWeekStart}
-            onAddTask={(date) => {
-              setEditingTask(null);
-              setTaskModalDefaultDate(date);
-              setTaskModalOpen(true);
-            }}
-            onEditTask={(task) => {
-              setEditingTask(task);
-              setTaskModalOpen(true);
-            }}
-            onToggleTask={handleToggleTask}
-            onMoveTask={handleMoveTask}
-            onOpenTouchMove={(task) => {
-              setTouchMoveTask(task);
-              setTouchMoveModalOpen(true);
-            }}
-            onOpenAIPlanner={() => navigateTo('ai')}
-          />
-        )}
-
-        {activeView === 'focus' && (
-          <FocusView
-            plan={plan}
-            timerMode={timerMode}
-            timerRemaining={timerRemaining}
-            timerTotal={timerTotal}
-            timerRunning={timerRunning}
-            timerCycles={timerCycles}
-            timerTaskId={timerTaskId}
-            timerSubjectId={timerSubjectId}
-            onSetMode={(mode) => {
-              if (!timerRunning) {
-                setTimerMode(mode);
-                const secs = plan.settings[mode] * 60;
-                setTimerTotal(secs);
-                setTimerRemaining(secs);
-              }
-            }}
-            onToggleTimer={toggleTimer}
-            onResetTimer={resetTimer}
-            onLogTimer={handleLogTimerManual}
-            onSkipTimerDemo={handleSkipTimerDemo}
-            onSelectTask={(taskId) => {
-              setTimerTaskId(taskId);
-              const task = plan.tasks.find(t => t.id === taskId);
-              if (task && task.subjectId) {
-                setTimerSubjectId(task.subjectId);
-              }
-            }}
-            onSelectSubject={setTimerSubjectId}
-          />
-        )}
-
         {activeView === 'subjects' && (
           <SubjectsView
             plan={plan}
@@ -1051,47 +1617,14 @@ export default function StudyPilotApp() {
         {activeView === 'insights' && (
           <InsightsView plan={plan} />
         )}
-
-        {activeView === 'account' && (
-          <AccountView
-            user={user}
-            stats={userStats}
-            plan={plan}
-            isAuthenticated={Boolean(user)}
-            syncStatus={syncStatus}
-            lastSyncedTime={lastSyncedTime}
-            onSyncNow={handleSyncNow}
-            onImportPrototype={handleImportPrototype}
-            onExportData={handleExportData}
-            onExportCSV={handleExportCSV}
-            onUpdateProfile={handleUpdateProfile}
-            onChangePassword={handleChangePassword}
-            onSignOut={handleSignOut}
-            onOpenAuth={() => {
-              setAuthInitialMode('login');
-              setAuthModalOpen(true);
-            }}
-            onResetData={handleResetData}
-          />
-        )}
-
-        {activeView === 'ai' && (
-          <AIAgentView
-            plan={plan}
-            token={token}
-            onApplyPlanTasks={handleApplyAITasks}
-            onUpdateTopicStage={handleUpdateTopicStageFromTest}
-            onNavigateToView={(view) => navigateTo(view as any)}
-            showToast={showToast}
-            initialTopicForTest={selectedTopicForTest}
-          />
-        )}
       </main>
 
       {/* Global Modals */}
       <AuthModal
         isOpen={authModalOpen}
         initialMode={authInitialMode}
+        prefillToken={resetTokenPrefill}
+        prefillEmail={resetEmailPrefill}
         onClose={() => setAuthModalOpen(false)}
         onLogin={handleLogin}
         onRegister={handleRegister}

@@ -576,7 +576,8 @@ def generate_heuristic_question(
     subject_name: str = "",
     question_index: int = 0,
     total_requested: int = 5,
-    used_questions: Optional[set] = None
+    used_questions: Optional[set] = None,
+    difficulty: str = "moderate"
 ) -> Dict[str, Any]:
     """
     Generates a high-quality, academically rigorous contextual mock question for any topic.
@@ -883,14 +884,23 @@ def generate_heuristic_question(
     ]
 
     total_archetypes = len(archetypes)
-    base_idx = (question_index + abs(hash(topic_name))) % total_archetypes
+    diff_norm = difficulty.lower().strip() if difficulty else "moderate"
+    if diff_norm == "easy":
+        pool = [0, 1, 2, 8, 9, 11, 12, 17]
+    elif diff_norm == "difficult":
+        pool = [3, 4, 5, 6, 7, 10, 14, 15, 16, 18, 19, 20]
+    else:
+        diff_norm = "moderate"
+        pool = list(range(total_archetypes))
 
-    selected = archetypes[base_idx]
+    pool_len = len(pool)
+    base_pool_idx = (question_index + abs(hash(topic_name))) % pool_len
+    selected = archetypes[pool[base_pool_idx]]
     q_text = selected["q"]
     counter = 1
-    while q_text in used_questions and counter < total_archetypes:
-        next_idx = (base_idx + counter) % total_archetypes
-        selected = archetypes[next_idx]
+    while q_text in used_questions and counter < pool_len:
+        next_idx = (base_pool_idx + counter) % pool_len
+        selected = archetypes[pool[next_idx]]
         q_text = selected["q"]
         counter += 1
 
@@ -913,7 +923,7 @@ def generate_heuristic_question(
         "options": opts,
         "correct_answer": new_ans,
         "explanation": selected["exp"],
-        "difficulty": "medium"
+        "difficulty": diff_norm
     }
 
 # -------------------------------------------------------------
@@ -1498,3 +1508,1413 @@ Your Role:
         "days_to_exam": days_to_exam,
         "has_yesterday_topics": bool(yesterday_topics and len(yesterday_topics) > 0)
     }
+
+# -------------------------------------------------------------
+# Full Syllabus Mock Test Service (60-Min & 3-Hour Tests)
+# -------------------------------------------------------------
+
+async def generate_full_syllabus_test(
+    syllabus: List[Dict[str, Any]],
+    duration_mins: int = 60,
+    difficulty: str = "moderate",
+    test_number: int = 1,
+    num_questions: Optional[int] = None,
+    subject_filter: Optional[str] = None,
+    role: Optional[str] = "competitive_exam",
+    api_key: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Generates examination papers:
+    - Subject-wise separate papers (e.g., Physics Paper, Chemistry Paper) OR Full Syllabus Combined Paper.
+    - Tailored to user role:
+      - 'student': School / College Curriculum standard (no negative marking, conceptual depth).
+      - 'competitive_exam': Competitive Entrance standard (+4/-1 negative marking, high analytical distractor density).
+      - 'professional': Certification / Applied standard.
+    - Strict adherence: Only uses real subjects & topics provided by user.
+    """
+    if not syllabus:
+        return {
+            "error": "no_syllabus",
+            "message": "No syllabus found. Please upload your syllabus in PDF, Excel, or CSV format to generate real exam papers."
+        }
+
+    # Filter to specific subject if requested
+    is_single_subject = False
+    single_subj_name = ""
+    if subject_filter and subject_filter.strip().lower() != "all":
+        matched = [
+            s for s in syllabus
+            if s.get("name", "").strip().lower() == subject_filter.strip().lower() or s.get("id", "").strip().lower() == subject_filter.strip().lower()
+        ]
+        if matched:
+            syllabus = matched
+            is_single_subject = True
+            single_subj_name = matched[0].get("name", "Subject")
+
+    # Validate duration & question counts
+    if duration_mins == 180:
+        target_questions = num_questions or 75
+    else:
+        duration_mins = 60
+        target_questions = num_questions or 30
+
+    target_questions = max(5, min(100, target_questions))
+    norm_diff = difficulty.lower() if difficulty.lower() in ["easy", "moderate", "difficult"] else "moderate"
+
+    # Distribute questions proportionally across subjects
+    all_subject_topics = []
+    for s in syllabus:
+        s_name = s.get("name", "General")
+        s_id = s.get("id", "s_" + secrets.token_hex(2))
+        topics = s.get("topics", [])
+        if not topics:
+            topics = [{"name": f"{s_name} Core Principles"}]
+        all_subject_topics.append({
+            "subject_id": s_id,
+            "subject": s_name,
+            "topics": [t.get("name", "Core Topic") if isinstance(t, dict) else str(t) for t in topics]
+        })
+
+    num_subjects = len(all_subject_topics)
+    qs_per_subject = max(1, target_questions // max(1, num_subjects))
+
+    used_questions = set()
+    questions = []
+    q_counter = 0
+
+    # Seed-based offset using test_number so Test #1, Test #2, Test #3 get different questions
+    test_seed_offset = (test_number - 1) * 19
+
+    # Role-based tuning
+    role_norm = role if role in ["student", "competitive_exam", "professional"] else "competitive_exam"
+    marking_scheme = {
+        "competitive_exam": {"correct": 4, "incorrect": -1, "type": "competitive", "label": "+4 for Correct, -1 for Incorrect (Competitive Marking)"},
+        "student": {"correct": 1, "incorrect": 0, "type": "standard", "label": "1 Mark per Question (No Negative Marking)"},
+        "professional": {"correct": 1, "incorrect": 0, "type": "certification", "label": "Standard Certification Grading"}
+    }.get(role_norm, {"correct": 1, "incorrect": 0, "type": "standard", "label": "Standard Grading"})
+
+    for subj_info in all_subject_topics:
+        s_name = subj_info["subject"]
+        s_id = subj_info["subject_id"]
+        s_topics = subj_info["topics"]
+        
+        for k in range(qs_per_subject):
+            if len(questions) >= target_questions:
+                break
+            q_counter += 1
+            t_name = s_topics[(k + test_seed_offset) % len(s_topics)]
+            
+            q = generate_heuristic_question(
+                topic_name=t_name,
+                subject_name=s_name,
+                question_index=test_seed_offset + q_counter,
+                total_requested=target_questions,
+                used_questions=used_questions,
+                difficulty=norm_diff
+            )
+            q["id"] = f"q_{test_number}_{q_counter}_{secrets.token_hex(2)}"
+            q["difficulty"] = norm_diff
+            q["subject"] = s_name
+            q["subjectId"] = s_id
+            q["marking_correct"] = marking_scheme["correct"]
+            q["marking_incorrect"] = marking_scheme["incorrect"]
+            imp_data = get_topic_importance(t_name, s_name)
+            q["importance"] = imp_data["importance"]
+            q["weightage"] = imp_data.get("weightage", "")
+            questions.append(q)
+
+    # If any remaining slots to reach target_questions
+    while len(questions) < target_questions:
+        q_counter += 1
+        subj_info = all_subject_topics[q_counter % len(all_subject_topics)]
+        s_name = subj_info["subject"]
+        s_id = subj_info["subject_id"]
+        t_name = subj_info["topics"][q_counter % len(subj_info["topics"])]
+        q = generate_heuristic_question(
+            topic_name=t_name,
+            subject_name=s_name,
+            question_index=test_seed_offset + q_counter + 60,
+            total_requested=target_questions,
+            used_questions=used_questions,
+            difficulty=norm_diff
+        )
+        q["id"] = f"q_{test_number}_{q_counter}_{secrets.token_hex(2)}"
+        q["difficulty"] = norm_diff
+        q["subject"] = s_name
+        q["subjectId"] = s_id
+        q["marking_correct"] = marking_scheme["correct"]
+        q["marking_incorrect"] = marking_scheme["incorrect"]
+        imp_data = get_topic_importance(t_name, s_name)
+        q["importance"] = imp_data["importance"]
+        q["weightage"] = imp_data.get("weightage", "")
+        questions.append(q)
+
+    if is_single_subject:
+        if duration_mins == 180:
+            title = f"🏆 {single_subj_name}: Comprehensive Grand Paper #{test_number} ({norm_diff.title()} Tier)"
+        else:
+            title = f"⚡ {single_subj_name}: 60-Minute Rapid Paper #{test_number} ({norm_diff.title()} Tier)"
+    else:
+        if duration_mins == 180:
+            title = f"🏆 Full Syllabus Grand Mock Examination #{test_number} ({norm_diff.title()} Tier)"
+        else:
+            title = f"⚡ Full Syllabus 60-Minute Rapid Test #{test_number} ({norm_diff.title()} Tier)"
+
+    return {
+        "source": "heuristic_ai",
+        "test_id": f"test_{secrets.token_hex(6)}",
+        "test_type": "subject_paper" if is_single_subject else "full_syllabus",
+        "subject": single_subj_name if is_single_subject else "All Subjects Combined",
+        "title": title,
+        "role": role_norm,
+        "marking_scheme": marking_scheme,
+        "duration_mins": duration_mins,
+        "time_limit_mins": duration_mins,
+        "difficulty": norm_diff,
+        "test_number": test_number,
+        "subjects": [s.get("name", "Subject") for s in syllabus],
+        "total_questions": len(questions),
+        "questions": questions,
+        "created_at": datetime.now().isoformat()
+    }
+
+
+# =============================================================================
+# 1. Flexible Learning Levels & Level Profiler
+# =============================================================================
+
+LEVEL_PROFILES = {
+    "class_6_8": {
+        "name": "Classes 6–8 (Middle School)",
+        "vocabulary": "simple, vibrant, everyday language with relatable analogies and friendly encouragement",
+        "depth": "foundational concepts, intuitive explanations, vivid real-world examples, visual descriptions",
+        "question_style": "direct conceptual MCQs, fun matching exercises, and basic applications",
+        "tone": "enthusiastic, warm, encouraging"
+    },
+    "class_9_10": {
+        "name": "Classes 9–10 (Secondary School / CBSE / ICSE)",
+        "vocabulary": "clear scientific & mathematical terminology with real-life context and structured breakdowns",
+        "depth": "core principles, formal definitions, step-by-step mathematical reasoning, exam-focused key terms",
+        "question_style": "CBSE board-style MCQs, assertion-reasoning, diagram interpretation, numericals",
+        "tone": "supportive, structured, academic"
+    },
+    "class_11_12": {
+        "name": "Classes 11–12 (Higher Secondary / Senior School)",
+        "vocabulary": "rigorous academic terminology, mathematical derivations, formal scientific conventions",
+        "depth": "deep theoretical foundation, multi-step derivations, edge cases, inter-concept links",
+        "question_style": "board & competitive foundation questions (JEE/NEET foundation, CBSE 12th standards)",
+        "tone": "analytical, precise, thorough"
+    },
+    "undergraduate": {
+        "name": "Undergraduate Courses (B.Tech / B.Sc / B.A / B.Com)",
+        "vocabulary": "industry-standard and university academic nomenclature, theoretical frameworks",
+        "depth": "architectural trade-offs, algorithmic analysis, case studies, empirical methodologies",
+        "question_style": "analytical reasoning, implementation trade-offs, conceptual problem solving",
+        "tone": "professional, academic, comprehensive"
+    },
+    "postgraduate": {
+        "name": "Postgraduate Courses (M.Tech / M.Sc / M.A / MBA)",
+        "vocabulary": "advanced domain terminology, formal research citations, comparative paradigms",
+        "depth": "in-depth comparative analysis, complex state transitions, theoretical proofs",
+        "question_style": "higher-order analytical problems, multi-variable synthesis, critical evaluations",
+        "tone": "intellectual, rigorous, scholarly"
+    },
+    "research": {
+        "name": "Research & Higher Studies (PhD / M.Phil / Fellowships)",
+        "vocabulary": "peer-reviewed research language, formal notation, epistemological clarity",
+        "depth": "state-of-the-art literature review, open problems, mathematical rigor, paradigm boundaries",
+        "question_style": "critical synthesis, proof sketches, experimental methodology critiques",
+        "tone": "scholarly, peer-to-peer, exploratory"
+    },
+    "competitive": {
+        "name": "Competitive Examinations (UGC NET, UPSC, SSC, Banking, GATE, NEET, JEE)",
+        "vocabulary": "official examination syllabus conventions, precision key phrases, elimination strategies",
+        "depth": "high-yield exam topics, recurring patterns, trap questions, shortcut formulas, memory mnemonics",
+        "question_style": "timed examination pattern MCQs with negative marking penalties, assertion-reason, tricky distractors",
+        "tone": "strategic, result-oriented, coach-like"
+    },
+    "custom": {
+        "name": "Custom Goal / Self-Paced Lifelong Learner",
+        "vocabulary": "accessible yet comprehensive, practical, focused on conceptual clarity",
+        "depth": "conceptual clarity paired with immediate practical utility",
+        "question_style": "knowledge verification and practical scenario checks",
+        "tone": "adaptable, practical, motivating"
+    }
+}
+
+def get_level_profile(level: str) -> Dict[str, str]:
+    norm = level.lower().strip() if level else "competitive"
+    return LEVEL_PROFILES.get(norm, LEVEL_PROFILES["competitive"])
+
+
+# =============================================================================
+# 2. Interactive AI Topic Learning Studio Engine
+# =============================================================================
+
+async def generate_interactive_topic_content(
+    topic_name: str,
+    subject_name: str = "General",
+    exam_name: str = "Target Examination",
+    education_level: str = "competitive",
+    unit_name: str = "",
+    learning_preferences: Optional[Dict[str, Any]] = None,
+    api_key: Optional[str] = None,
+    **kwargs
+) -> Dict[str, Any]:
+    """
+    Generates level-adapted, rich interactive learning studio content for any syllabus topic:
+    - Summary & Prerequisites
+    - Section-by-section exploration (with real-life examples, analogies, formulas/code, diagrams)
+    - Interactive elements (flashcards, flipcards, mini-quiz, matching pairs, worked examples, mnemonics)
+    - Key takeaways & 3 comprehension checks
+    """
+    profile = get_level_profile(education_level)
+    level_name = profile["name"]
+    vocab = profile["vocabulary"]
+    depth = profile["depth"]
+
+    system_instruction = (
+        f"You are StudyPilot AI's Senior Interactive Tutor. The learner is studying at the '{level_name}' level. "
+        f"Adopt vocabulary style: '{vocab}'. Content depth: '{depth}'. "
+        f"Always return valid JSON adhering strictly to the requested schema. Avoid dense walls of text. "
+        f"Use relatable analogies, real-life examples, and structured sections."
+    )
+
+    prompt = f"""
+    Create a complete, interactive, section-by-section learning studio package for:
+    Topic: "{topic_name}"
+    Subject: "{subject_name}"
+    Exam / Learning Goal: "{exam_name}"
+    Education Level: "{level_name}"
+
+    Return ONLY a JSON object with this exact structure:
+    {{
+        "summary": "Clear, engaging 2-3 sentence overview suitable for {level_name}",
+        "prerequisites": ["Prerequisite Concept 1", "Prerequisite Concept 2"],
+        "sections": [
+            {{
+                "id": "sec_1",
+                "title": "1. Core Concept Introduction",
+                "content": "Clear, bite-sized explanation without jargon walls...",
+                "real_life_example": "Concrete everyday scenario or real-world application...",
+                "analogy": "Memorable analogy suitable for {level_name}...",
+                "formula_or_code": "Relevant formula, snippet, or step-by-step logic (or null if purely qualitative)",
+                "diagram_concept": "Visual description or flowchart layout for mental imagery"
+            }},
+            {{
+                "id": "sec_2",
+                "title": "2. Working Mechanism & Step-by-Step Breakdown",
+                "content": "How it works, key phases, rules, or components...",
+                "real_life_example": "Another vivid practical application...",
+                "analogy": "Analogy clarifying edge cases...",
+                "formula_or_code": "Working formula or example...",
+                "diagram_concept": "Step-by-step state transition or hierarchy"
+            }},
+            {{
+                "id": "sec_3",
+                "title": "3. Critical Applications & Exam Traps",
+                "content": "Common pitfalls, edge cases, and high-yield insights...",
+                "real_life_example": "Where students make mistakes or real system failure scenario...",
+                "analogy": "Mnemonic or mental checklist...",
+                "formula_or_code": null,
+                "diagram_concept": "Comparison matrix or decision tree"
+            }}
+        ],
+        "interactive_elements": {{
+            "flashcards": [
+                {{"id": "fc_1", "front": "Key Term / Question 1", "back": "Precise definition / fact", "tag": "Core Definition"}},
+                {{"id": "fc_2", "front": "Key Term / Question 2", "back": "Precise definition / fact", "tag": "Formula / Rule"}},
+                {{"id": "fc_3", "front": "Key Term / Question 3", "back": "Precise definition / fact", "tag": "Exam Insight"}}
+            ],
+            "flip_cards": [
+                {{"id": "fl_1", "question": "Why does this principle hold true?", "answer": "Detailed answer explaining the underlying cause.", "hint": "Think of conservation / equilibrium."}},
+                {{"id": "fl_2", "question": "What is the primary trade-off?", "answer": "Explanation of balance between speed vs memory or cost vs accuracy.", "hint": "Asymptotic bounds."}}
+            ],
+            "mini_quiz": [
+                {{
+                    "question": "Conceptual check question testing understanding...",
+                    "options": ["Option A", "Option B", "Option C", "Option D"],
+                    "correct_idx": 1,
+                    "explanation": "Why Option B is correct and others are distractors."
+                }},
+                {{
+                    "question": "Second check question testing real-world application...",
+                    "options": ["Choice 1", "Choice 2", "Choice 3", "Choice 4"],
+                    "correct_idx": 0,
+                    "explanation": "Logical justification based on core rules."
+                }}
+            ],
+            "matching_pairs": [
+                {{"left": "Concept A", "right": "Matching Characteristic A"}},
+                {{"left": "Concept B", "right": "Matching Characteristic B"}},
+                {{"left": "Concept C", "right": "Matching Characteristic C"}}
+            ],
+            "worked_examples": [
+                {{
+                    "problem": "Clear problem statement matching {level_name} level...",
+                    "steps": [
+                        "Step 1: Identify given parameters and constraints.",
+                        "Step 2: Apply the governing principle or formula.",
+                        "Step 3: Simplify and verify boundary conditions."
+                    ],
+                    "final_answer": "Final derived result or conclusion."
+                }}
+            ],
+            "mnemonics": [
+                {{"trick_phrase": "Clever Memory Acronym / Phrase", "memory_explanation": "How to recall the sequence or essential formula."}}
+            ]
+        }},
+        "key_takeaways": [
+            "Essential Point 1",
+            "Essential Point 2",
+            "Essential Point 3",
+            "Essential Point 4"
+        ],
+        "comprehension_checks": [
+            {{
+                "question": "Comprehension Check 1: Fundamental Concept",
+                "options": ["Incorrect distractor 1", "Correct foundational answer", "Plausible misconception", "Unrelated fact"],
+                "correct_index": 1,
+                "explanation": "Explains why this check verifies basic comprehension."
+            }},
+            {{
+                "question": "Comprehension Check 2: Applied Scenario",
+                "options": ["Correct practical outcome", "Overestimated outcome", "Zero change", "Reverse effect"],
+                "correct_index": 0,
+                "explanation": "Explains the application logic."
+            }},
+            {{
+                "question": "Comprehension Check 3: Edge Case / Distinction",
+                "options": ["Distractor A", "Distractor B", "Correct distinction", "Distractor D"],
+                "correct_index": 2,
+                "explanation": "Details the subtle difference tested."
+            }}
+        ]
+    }}
+    """
+
+    llm_output = await call_llm(prompt, api_key=api_key, system_instruction=system_instruction, json_mode=True)
+    if llm_output:
+        try:
+            # Clean markdown codeblocks if present
+            cleaned = llm_output.strip()
+            if cleaned.startswith("```json"):
+                cleaned = cleaned[7:]
+            if cleaned.startswith("```"):
+                cleaned = cleaned[3:]
+            if cleaned.endswith("```"):
+                cleaned = cleaned[:-3]
+            parsed = json.loads(cleaned.strip())
+            if "sections" in parsed and "interactive_elements" in parsed:
+                parsed["source"] = "ai_generated"
+                parsed["education_level"] = education_level
+                return parsed
+        except Exception as e:
+            print(f"[AI Learning Studio Warning] JSON parsing error: {e}. Falling back to heuristic generator.")
+
+    # High-Quality Level-Adapted Heuristic Fallback
+    return generate_heuristic_topic_learning_studio(topic_name, subject_name, exam_name, education_level)
+
+
+def generate_heuristic_topic_learning_studio(
+    topic_name: str,
+    subject_name: str,
+    exam_name: str,
+    education_level: str
+) -> Dict[str, Any]:
+    """
+    Robust fallback generating structured, interactive learning studio content tailored to the education level.
+    """
+    profile = get_level_profile(education_level)
+    level_name = profile["name"]
+    is_school = education_level in ["class_6_8", "class_9_10"]
+    is_advanced = education_level in ["undergraduate", "postgraduate", "research"]
+
+    clean_t = topic_name.strip()
+    clean_s = subject_name.strip()
+
+    if is_school:
+        summary = f"{clean_t} is an exciting and fundamental topic in {clean_s}. It helps us understand how things work in the world around us through easy observations and clear rules."
+        ex1 = f"Imagine baking a cake or riding a bicycle: {clean_t} operates just like a step-by-step recipe where every part has a special job to do."
+        analogy1 = "Think of it like a team of players on a field: each rule works together so the entire system plays smoothly."
+    elif is_advanced:
+        summary = f"{clean_t} represents a foundational theoretical and applied construct within {clean_s}, governing formal state transitions, invariant constraints, and optimization boundaries."
+        ex1 = f"In large-scale production architectures and scientific models, {clean_t} dictates critical latency boundaries and reliability guarantees."
+        analogy1 = "Consider it as the protocol layer in distributed computing: strict contractual interfaces maintaining coherence across heterogeneous nodes."
+    else:
+        summary = f"{clean_t} is a core high-yield topic in {clean_s} for {exam_name}. Mastering its theoretical principles, typical edge cases, and problem-solving patterns is essential for competitive success."
+        ex1 = f"A classic real-world scenario involves balance and rate of exchange: where {clean_t} governs efficiency limits and resource equilibrium."
+        analogy1 = "Think of it as a well-calibrated gearbox: adjusting input variables directly dictates output torque and throughput."
+
+    sections = [
+        {
+            "id": "sec_1",
+            "title": f"1. Foundations of {clean_t}",
+            "content": f"At its core, {clean_t} establishes the foundational relationship between key entities in {clean_s}. Understanding this concept begins by identifying the active variables, their physical or logical meaning, and the boundary conditions under which they operate.",
+            "real_life_example": ex1,
+            "analogy": analogy1,
+            "formula_or_code": f"Core Principle: Primary Entity ∝ Characteristic Rate of {clean_t}" if not is_school else f"Rule: When Input changes, {clean_t} produces a balanced Result",
+            "diagram_concept": f"Flow diagram illustrating: Input Stimulus → Process Rule of {clean_t} → Output State"
+        },
+        {
+            "id": "sec_2",
+            "title": f"2. Operational Mechanisms & Step-by-Step Breakdown",
+            "content": f"When applying {clean_t}, we observe a structured sequence of transformations. By breaking the process into distinct stages, you can isolate what stays constant (the invariant) versus what transforms dynamically.",
+            "real_life_example": f"Observing real-time changes when {clean_t} is subjected to stress or maximum capacity.",
+            "analogy": "Like checkpoints in a marathon: each phase confirms balance before the next phase activates.",
+            "formula_or_code": "Step 1: Validate Initial State\nStep 2: Apply Governing Law of " + clean_t + "\nStep 3: Verify Conservation & Limits",
+            "diagram_concept": f"State transition matrix showing Phase 1 (Initial) -> Phase 2 (Transition) -> Phase 3 (Steady State)"
+        },
+        {
+            "id": "sec_3",
+            "title": f"3. Examination Traps, Edge Cases & Synthesis",
+            "content": f"Examination questions frequently test boundary conditions where intuitive assumptions fail. Keep a sharp eye on hidden constraints, unit conversions, and conditions where the standard formula no longer applies directly.",
+            "real_life_example": f"Common exam trap: confusing inverse relationships with linear changes in {clean_t}.",
+            "analogy": "A speed limit sign: it works perfectly on highways, but special school-zone rules override it when pedestrians are present.",
+            "formula_or_code": "Caution Checklist:\n- Are dimensions consistent?\n- Are external disturbances zero?\n- Does the boundary test hold?",
+            "diagram_concept": "Decision tree distinguishing standard cases from exception / edge cases"
+        }
+    ]
+
+    interactive_elements = {
+        "flashcards": [
+            {
+                "id": "fc_1",
+                "front": f"What is the primary definition of {clean_t}?",
+                "back": f"The governing concept in {clean_s} that explains the state, transformation, and fundamental behavior of its active elements.",
+                "tag": "Core Definition"
+            },
+            {
+                "id": "fc_2",
+                "front": f"What is the single most common pitfall when solving problems in {clean_t}?",
+                "back": "Failing to check boundary constraints or assuming linearity where non-linear or threshold conditions apply.",
+                "tag": "Exam Trap"
+            },
+            {
+                "id": "fc_3",
+                "front": f"What invariant is preserved during {clean_t} operations?",
+                "back": "Total energy, momentum, charge, or logical integrity remains conserved under closed system assumptions.",
+                "tag": "Key Law"
+            }
+        ],
+        "flip_cards": [
+            {
+                "id": "fl_1",
+                "question": f"Why does understanding {clean_t} matter beyond memorizing the formula?",
+                "answer": "Formulas are only valid under specific assumptions. Understanding the core concept lets you solve non-standard exam problems effortlessly.",
+                "hint": "Focus on the 'why' rather than just the 'what'."
+            },
+            {
+                "id": "fl_2",
+                "question": f"How can you quickly sanity-check an answer involving {clean_t}?",
+                "answer": "Perform dimensional analysis and test extreme values (zero and infinity) to verify logical consistency.",
+                "hint": "Boundary testing."
+            }
+        ],
+        "mini_quiz": [
+            {
+                "question": f"Under standard conditions, which statement accurately characterizes {clean_t} in {clean_s}?",
+                "options": [
+                    f"It operates independently of any surrounding constraints",
+                    f"It describes a deterministic relationship governed by physical or logical conservation laws",
+                    f"It only applies when external resistance is infinite",
+                    f"It was superseded and is no longer relevant in modern curricula"
+                ],
+                "correct_idx": 1,
+                "explanation": f"In {clean_s}, {clean_t} is universally grounded in fundamental conservation and deterministic rules."
+            },
+            {
+                "question": f"When solving an examination question on {clean_t}, what is the first recommended step?",
+                "options": [
+                    "Immediately write down numbers without reading units",
+                    "Identify the system boundary, given parameters, and governing law",
+                    "Guess the choice that has the largest number",
+                    "Skip directly to the final formula without verifying assumptions"
+                ],
+                "correct_idx": 1,
+                "explanation": "Proper problem decomposition prevents misapplying formulas to out-of-boundary problems."
+            }
+        ],
+        "matching_pairs": [
+            {"left": f"{clean_t} Definition", "right": "Foundational behavioral principle"},
+            {"left": "Standard Assumption", "right": "Closed or equilibrium system"},
+            {"left": "Verification Method", "right": "Boundary and dimensional check"},
+            {"left": "Exam Pitfall", "right": "Unverified linearity assumption"}
+        ],
+        "worked_examples": [
+            {
+                "problem": f"Given a scenario in {clean_s} involving {clean_t}, explain how to compute the resulting equilibrium state.",
+                "steps": [
+                    f"Step 1: List all input parameters and state the governing equation for {clean_t}.",
+                    "Step 2: Check boundary values to ensure the equations apply cleanly.",
+                    "Step 3: Solve for the unknown variable while tracking dimensional consistency.",
+                    "Step 4: Verify that the result satisfies fundamental physical or logical limits."
+                ],
+                "final_answer": f"The equilibrium state is uniquely determined and verified against the boundary conditions of {clean_t}."
+            }
+        ],
+        "mnemonics": [
+            {
+                "trick_phrase": "I-D-E-A-L (Identify, Define, Equation, Apply, Limit)",
+                "memory_explanation": f"Use IDEAL to tackle any question in {clean_t}: Identify the system, Define variables, pick the Equation, Apply substitutions, check the Limit!"
+            }
+        ]
+    }
+
+    comprehension_checks = [
+        {
+            "question": f"Comprehension Check 1: What is the primary role of {clean_t}?",
+            "options": [
+                f"To act as an optional footnote in {clean_s}",
+                f"To establish the fundamental relationship governing system transformation and balance",
+                f"To increase complexity without practical utility",
+                f"To replace experimental observation with guesswork"
+            ],
+            "correct_index": 1,
+            "explanation": f"{clean_t} is fundamental because it provides the exact governing relationship for the system."
+        },
+        {
+            "question": f"Comprehension Check 2: When external constraints are modified, what happens to {clean_t}?",
+            "options": [
+                "The system dynamically shifts toward a new equilibrium dictated by the governing law",
+                "The system immediately collapses with no predictable outcome",
+                "Nothing changes under any circumstances",
+                "The laws of logic become undefined"
+            ],
+            "correct_index": 0,
+            "explanation": "Dynamic equilibrium adjusts predictably according to the system's governing constraints."
+        },
+        {
+            "question": f"Comprehension Check 3: Which strategy guarantees high accuracy when answering exam questions on {clean_t}?",
+            "options": [
+                "Memorizing only the final answer without steps",
+                "Relying solely on visual intuition without verification",
+                "Checking dimensions, boundary cases, and initial system assumptions",
+                "Answering randomly within the first 5 seconds"
+            ],
+            "correct_index": 2,
+            "explanation": "Systematic verification of dimensions and boundary limits prevents common examiner traps."
+        }
+    ]
+
+    return {
+        "source": "heuristic_studio",
+        "education_level": education_level,
+        "summary": summary,
+        "prerequisites": [
+            f"Basic terminology in {clean_s}",
+            "Fundamental arithmetic & logical reasoning",
+            "Concept of equilibrium and state transitions"
+        ],
+        "sections": sections,
+        "interactive_elements": interactive_elements,
+        "key_takeaways": [
+            f"{clean_t} governs the balance and operational flow of {clean_s}.",
+            "Always verify boundary conditions and dimensional units before applying standard formulas.",
+            "Identify what is conserved vs what transforms dynamically.",
+            "Use the IDEAL problem-solving framework for guaranteed exam accuracy."
+        ],
+        "comprehension_checks": comprehension_checks
+    }
+
+
+# =============================================================================
+# 3. In-Topic Conversational AI Tutor ("Ask AI Tutor")
+# =============================================================================
+
+async def chat_with_topic_tutor(
+    topic_name: str,
+    subject_name: str,
+    education_level: str,
+    history: List[Dict[str, str]],
+    user_query: str,
+    api_key: Optional[str] = None
+) -> str:
+    """
+    Conversational AI tutor embedded inside a specific syllabus topic.
+    Responds at the student's exact education level with clarity, analogies, and step-by-step guidance.
+    """
+    profile = get_level_profile(education_level)
+    level_name = profile["name"]
+    vocab = profile["vocabulary"]
+    depth = profile["depth"]
+
+    system_instruction = (
+        f"You are StudyPilot's personal AI Tutor for the topic '{topic_name}' in subject '{subject_name}'. "
+        f"The user is at the '{level_name}' education level. "
+        f"Use vocabulary style: '{vocab}'. Content depth: '{depth}'. "
+        f"Keep answers clear, encouraging, structured, and focused strictly on the topic. "
+        f"Break down difficult points into steps. Use relatable analogies when helpful."
+    )
+
+    # Format conversation history
+    context_msgs = []
+    for h in history[-6:]:
+        role = "User" if h.get("role") == "user" else "Assistant"
+        context_msgs.append(f"{role}: {h.get('message', '')}")
+    history_block = "\n".join(context_msgs)
+
+    prompt = f"""
+    Context Topic: "{topic_name}" ({subject_name})
+    Target Education Level: {level_name}
+
+    Conversation History:
+    {history_block}
+
+    User Question: "{user_query}"
+
+    Provide a helpful, direct, and pedagogically sound explanation tailored to {level_name}.
+    If the user asks for a simpler explanation, use everyday analogies.
+    If the user asks for step-by-step problem solving, enumerate each step clearly.
+    """
+
+    llm_output = await call_llm(prompt, api_key=api_key, system_instruction=system_instruction)
+    if llm_output and len(llm_output.strip()) > 10:
+        return llm_output.strip()
+
+    # Heuristic Fallback Response
+    q_low = user_query.lower()
+    if "simple" in q_low or "beginner" in q_low or "explain like" in q_low:
+        return (
+            f"Here is the simplest way to understand **{topic_name}**:\n\n"
+            f"Think of it like a familiar real-world balance. Whenever you change one factor in {subject_name}, "
+            f"the other factors adjust so that the total balance is preserved. "
+            f"You don't need complicated math right now — just remember the golden rule: **Input drives the process, and the rules of {topic_name} decide the outcome!**"
+        )
+    elif "example" in q_low:
+        return (
+            f"Here is a great real-life example of **{topic_name}**:\n\n"
+            f"Consider a water filtration plant or a smartphone battery charging curve. "
+            f"At first, the rate of flow is high, but as capacity fills up, the resistance increases to maintain equilibrium. "
+            f"In **{topic_name}**, the exact same principle applies: changes happen fast initially, then stabilize into a steady state."
+        )
+    elif "step" in q_low or "solve" in q_low:
+        return (
+            f"Here is the 3-step master method for **{topic_name}**:\n\n"
+            f"1. **State the Given Data**: Write down what parameters you know and their units.\n"
+            f"2. **Apply the Core Relationship**: Use the governing principle of {topic_name} to relate the unknown variable to the knowns.\n"
+            f"3. **Check the Limits**: Check whether your answer makes physical or logical sense at extreme values (e.g. zero or infinity)!"
+        )
+    elif "test" in q_low or "quiz" in q_low:
+        return (
+            f"Let's test your understanding of **{topic_name}** right now!\n\n"
+            f"**Question**: In {subject_name}, what happens to the output of {topic_name} if you double the primary input while keeping all other variables constant?\n\n"
+            f"*(Think carefully: Does it double, halve, or remain constant? Reply with your reasoning and I'll review it!)*"
+        )
+    else:
+        return (
+            f"Great question about **{topic_name}** in {subject_name}!\n\n"
+            f"At the {level_name} level, the key takeaway is that {topic_name} connects the underlying rules of {subject_name} with practical results. "
+            f"Always look at what is conserved and what boundary limits exist. "
+            f"Would you like me to show a step-by-step example, explain it with a fun analogy, or quiz you on this concept?"
+        )
+
+
+# =============================================================================
+# 4. Topic-Wise Question Practice & Detailed Evaluation
+# =============================================================================
+
+async def generate_topic_practice_questions(
+    topic_name: str,
+    subject_name: str,
+    education_level: str = "competitive",
+    difficulty: str = "intermediate",
+    num_questions: int = 5,
+    api_key: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """
+    Generates topic-wise questions at specified difficulty:
+    - beginner, easy, intermediate, advanced, exam_level
+    Includes question, options, correct answer, step-by-step explanation, mistake analysis, and hints.
+    """
+    profile = get_level_profile(education_level)
+    level_name = profile["name"]
+    q_count = max(3, min(15, num_questions))
+
+    system_instruction = (
+        f"You are a master question creator for '{level_name}'. "
+        f"Generate {q_count} rigorous, high-quality practice questions for the topic '{topic_name}' in '{subject_name}'. "
+        f"Target difficulty: '{difficulty}'. Return ONLY a JSON list of questions."
+    )
+
+    prompt = f"""
+    Generate {q_count} practice questions for:
+    Topic: "{topic_name}"
+    Subject: "{subject_name}"
+    Education Level: "{level_name}"
+    Difficulty: "{difficulty}" (Levels: beginner, easy, intermediate, advanced, exam_level)
+
+    Return ONLY a JSON array with objects matching this schema:
+    [
+        {{
+            "id": "tpq_1",
+            "question_text": "Precise question testing {difficulty} level concept...",
+            "question_type": "single_choice",
+            "options": ["Option A", "Option B", "Option C", "Option D"],
+            "correct_answer": "Option B",
+            "correct_index": 1,
+            "explanation": "Clear, complete explanation of why Option B is correct...",
+            "mistake_analysis": "Common misunderstanding: Students frequently pick Option A because...",
+            "hint": "Remember the fundamental law of conservation...",
+            "difficulty": "{difficulty}",
+            "prerequisite_topic": "Foundational prerequisite to review if struggling"
+        }}
+    ]
+    """
+
+    llm_output = await call_llm(prompt, api_key=api_key, system_instruction=system_instruction, json_mode=True)
+    if llm_output:
+        try:
+            cleaned = llm_output.strip()
+            if cleaned.startswith("```json"):
+                cleaned = cleaned[7:]
+            if cleaned.startswith("```"):
+                cleaned = cleaned[3:]
+            if cleaned.endswith("```"):
+                cleaned = cleaned[:-3]
+            parsed = json.loads(cleaned.strip())
+            if isinstance(parsed, dict) and "questions" in parsed:
+                parsed = parsed["questions"]
+            if isinstance(parsed, list) and len(parsed) > 0:
+                for idx, q in enumerate(parsed):
+                    if "id" not in q:
+                        q["id"] = f"tpq_{idx+1}_{secrets.token_hex(2)}"
+                    q["difficulty"] = difficulty
+                    q["topic_name"] = topic_name
+                    q["subject_name"] = subject_name
+                return parsed
+        except Exception as e:
+            print(f"[Practice Generator Warning] LLM parse error: {e}. Falling back to heuristic question bank.")
+
+    # High-quality heuristic fallback questions
+    return generate_heuristic_practice_questions(topic_name, subject_name, education_level, difficulty, q_count)
+
+
+def generate_heuristic_practice_questions(
+    topic_name: str,
+    subject_name: str,
+    education_level: str,
+    difficulty: str,
+    count: int
+) -> List[Dict[str, Any]]:
+    clean_t = topic_name.strip()
+    clean_s = subject_name.strip()
+    questions = []
+
+    templates = [
+        {
+            "q": f"Which fundamental relationship is the cornerstone of {clean_t} in {clean_s}?",
+            "opts": [
+                f"Direct linear invariance regardless of boundary changes",
+                f"State transitions governed by the core conservation laws of {clean_s}",
+                f"Static independence from all surrounding physical or logical variables",
+                f"Random fluctuations without deterministic convergence"
+            ],
+            "ans": 1,
+            "exp": f"In {clean_s}, {clean_t} operates through deterministic state transitions bound by conservation principles.",
+            "mistake": "Don't assume systems operate in complete independence; boundary conditions always couple variables.",
+            "hint": "Look for the choice highlighting conservation and deterministic transition."
+        },
+        {
+            "q": f"When analyzing {clean_t} under {difficulty} constraints, what is the critical invariant that must be maintained?",
+            "opts": [
+                "System equilibrium and relational consistency",
+                "Maximum entropy with zero useful output",
+                "Arbitrary variable scaling without dimensional balance",
+                "Total cessation of all state transitions"
+            ],
+            "ans": 0,
+            "exp": "Relational consistency and equilibrium preservation are essential invariants across all problem variations.",
+            "mistake": "Students often neglect verifying that units and equilibrium conditions hold throughout the derivation.",
+            "hint": "Think about what must stay conserved when the system transitions."
+        },
+        {
+            "q": f"In an examination scenario involving {clean_t}, what unexpected effect occurs if primary constraints are doubled?",
+            "opts": [
+                "The system ceases to function completely",
+                "The response follows a non-linear threshold governed by the system's rate equation",
+                "The output doubles in an unconstrained linear fashion",
+                "Nothing changes under any circumstance"
+            ],
+            "ans": 1,
+            "exp": "Real-world and examination systems frequently exhibit non-linear response curves rather than naive linear scaling.",
+            "mistake": "The most common trap is assuming direct 1-to-1 linear proportionality without checking rate equations.",
+            "hint": "Be alert for non-linear saturation or threshold behavior."
+        },
+        {
+            "q": f"Which diagnostic check provides the fastest verification of an answer derived for {clean_t}?",
+            "opts": [
+                "Comparing with arbitrary random numbers",
+                "Testing extreme boundary limits (zero, infinity) and checking dimensional consistency",
+                "Assuming the longest option is always correct",
+                "Ignoring units entirely"
+            ],
+            "ans": 1,
+            "exp": "Dimensional analysis combined with extreme-value boundary testing instantly exposes algebraic errors.",
+            "mistake": "Rushing through calculation without sanity-checking units is the leading cause of negative marks.",
+            "hint": "What simple check tells you if units or limits are broken?"
+        },
+        {
+            "q": f"Why is {clean_t} considered a high-priority topic for {subject_name} examinations?",
+            "opts": [
+                "It has no practical application in real life",
+                "It synthesizes multiple foundational concepts and tests analytical problem-solving skills",
+                "It was only added to the syllabus as an afterthought",
+                "It requires zero preparation or conceptual clarity"
+            ],
+            "ans": 1,
+            "exp": "Examiners favor topics like this because they effectively discriminate between rote memorization and deep conceptual understanding.",
+            "mistake": "Memorizing standard question patterns without understanding underlying mechanisms leads to failure on modified exam questions.",
+            "hint": "Consider why examiners choose questions that bridge multiple concepts."
+        }
+    ]
+
+    for idx in range(count):
+        tmpl = templates[idx % len(templates)]
+        questions.append({
+            "id": f"tpq_{idx+1}_{secrets.token_hex(2)}",
+            "question_text": tmpl["q"],
+            "question_type": "single_choice",
+            "options": tmpl["opts"],
+            "correct_answer": tmpl["opts"][tmpl["ans"]],
+            "correct_index": tmpl["ans"],
+            "explanation": tmpl["exp"],
+            "mistake_analysis": tmpl["mistake"],
+            "hint": tmpl["hint"],
+            "difficulty": difficulty,
+            "prerequisite_topic": f"Foundations of {clean_s}"
+        })
+
+    return questions
+
+
+def evaluate_topic_practice_answer(
+    question_data: Optional[Dict[str, Any]] = None,
+    user_answer: Any = None,
+    question_text: Optional[str] = None,
+    correct_answer: Optional[str] = None,
+    topic_title: Optional[str] = None,
+    difficulty: Optional[str] = None,
+    education_level: Optional[str] = None,
+    **kwargs
+) -> Dict[str, Any]:
+    """
+    Evaluates student response, returns correctness, comprehensive explanation,
+    mistake analysis, and prerequisite recommendations.
+    """
+    if question_data is None:
+        question_data = {
+            "question_text": question_text or "Question",
+            "correct_answer": correct_answer or "",
+            "explanation": f"The correct answer '{correct_answer}' directly follows from the governing principles of {topic_title or 'this topic'}.",
+            "mistake_analysis": f"Review boundary conditions and basic rules for {topic_title or 'this topic'}.",
+            "hint": f"Consider the core definitions and invariants of {topic_title or 'this topic'}.",
+            "prerequisite_topic": f"Fundamentals of {topic_title or 'this topic'}"
+        }
+
+    correct_idx = question_data.get("correct_index", 0)
+    options = question_data.get("options", [])
+    correct_text = question_data.get("correct_answer") or (options[correct_idx] if options and len(options) > correct_idx else "")
+
+    is_correct = False
+    if isinstance(user_answer, int):
+        is_correct = (user_answer == correct_idx)
+    elif user_answer is not None:
+        user_str = str(user_answer).strip().lower()
+        if user_str == str(correct_idx):
+            is_correct = True
+        elif correct_text and user_str == correct_text.strip().lower():
+            is_correct = True
+        elif correct_answer and user_str == str(correct_answer).strip().lower():
+            is_correct = True
+
+    explanation = question_data.get("explanation", f"The selected answer adheres to the governing principles of {topic_title or 'this concept'}.")
+    mistake_analysis = question_data.get("mistake_analysis", f"Review the underlying conditions and typical pitfalls in {topic_title or 'this topic'}.")
+    hint = question_data.get("hint", f"Review the core definition and constraints.")
+    prerequisite = question_data.get("prerequisite_topic", f"Prerequisites for {topic_title or 'this topic'}")
+
+    return {
+        "is_correct": is_correct,
+        "correct_answer": correct_text or correct_answer or "",
+        "correct_index": correct_idx,
+        "explanation": explanation,
+        "mistake_analysis": mistake_analysis if not is_correct else None,
+        "hint": hint,
+        "prerequisite_topic": prerequisite if not is_correct else None,
+        "mastery_points": 10 if is_correct else -2
+    }
+
+
+# =============================================================================
+# 5. Smart Recovery Planner (Automatic Replanning for Missed Days)
+# =============================================================================
+
+def calculate_smart_recovery_plan(
+    exam_name: str = "Target Examination",
+    exam_date_str: Optional[str] = None,
+    current_tasks: Optional[List[Dict[str, Any]]] = None,
+    daily_available_hours: float = 3.0,
+    sitting_capacity_mins: int = 45,
+    available_days: Optional[List[str]] = None,
+    missed_tasks: Optional[List[Dict[str, Any]]] = None,
+    remaining_topics: Optional[List[Dict[str, Any]]] = None,
+    exam_date: Optional[str] = None,
+    daily_hours: Optional[float] = None,
+    **kwargs
+) -> Dict[str, Any]:
+    """
+    Recognizes missed or postponed study sessions, recalculates remaining workload,
+    determines time left until the exam, prioritizes high-yield & weak topics,
+    and redistributes tasks realistically without burning out the user.
+    """
+    today_dt = datetime.now().date()
+    today_str = today_dt.strftime("%Y-%m-%d")
+
+    if exam_date is not None and exam_date_str is None:
+        exam_date_str = exam_date
+    if daily_hours is not None:
+        daily_available_hours = daily_hours
+
+    explicit_missed = None
+    if missed_tasks is not None:
+        explicit_missed = list(missed_tasks)
+    if current_tasks is None:
+        current_tasks = (missed_tasks or []) + (remaining_topics or [])
+
+    # Parse exam date
+    if exam_date_str:
+        try:
+            exam_dt = datetime.strptime(exam_date_str[:10], "%Y-%m-%d").date()
+        except Exception:
+            exam_dt = today_dt + timedelta(days=30)
+    else:
+        exam_dt = today_dt + timedelta(days=30)
+
+    days_remaining = max(1, (exam_dt - today_dt).days)
+
+    # Detect missed tasks: scheduled for a date strictly before today and still pending
+    missed_tasks = []
+    future_tasks = []
+    completed_tasks = []
+
+    if explicit_missed is not None:
+        missed_tasks = explicit_missed
+        future_tasks = [t for t in current_tasks if t not in missed_tasks and t.get("status") != "completed"]
+    else:
+        for t in current_tasks:
+            t_date = t.get("scheduled_date") or t.get("date") or today_str
+            is_done = t.get("status") == "completed" or t.get("done") is True
+
+            if is_done:
+                completed_tasks.append(t)
+            elif t_date < today_str:
+                missed_tasks.append(t)
+            else:
+                future_tasks.append(t)
+
+    missed_count = len(missed_tasks)
+
+    # Total remaining workload in minutes
+    missed_mins = sum(t.get("estimated_minutes") or t.get("mins") or 45 for t in missed_tasks)
+    future_mins = sum(t.get("estimated_minutes") or t.get("mins") or 45 for t in future_tasks)
+    total_remaining_mins = missed_mins + future_mins
+
+    daily_mins_capacity = int(daily_available_hours * 60)
+    total_available_study_mins = days_remaining * daily_mins_capacity
+
+    # Reserve 25% of final days for mock tests and revision buffer
+    revision_buffer_days = max(2, int(days_remaining * 0.25))
+    learning_days_available = max(1, days_remaining - revision_buffer_days)
+    learning_capacity_mins = learning_days_available * daily_mins_capacity
+
+    is_feasible = (total_remaining_mins <= learning_capacity_mins)
+    required_daily_hours = round((total_remaining_mins / max(1, learning_days_available)) / 60, 1)
+
+    # Sort missed tasks by priority (high priority first)
+    priority_weight = {"high": 3, "medium": 2, "low": 1}
+    sorted_missed = sorted(
+        missed_tasks,
+        key=lambda x: priority_weight.get(str(x.get("priority", "medium")).lower(), 2),
+        reverse=True
+    )
+
+    # Redistribute tasks into available future dates
+    rescheduled_moves = []
+    assigned_day_offset = 0
+
+    # Weekday filter (case-insensitive & 3-letter prefix)
+    allowed_set = set(d.strip().lower()[:3] for d in (available_days or ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]))
+    weekday_map = {0: "mon", 1: "tue", 2: "wed", 3: "thu", 4: "fri", 5: "sat", 6: "sun"}
+
+    for idx, mt in enumerate(sorted_missed):
+        # Find next valid weekday
+        loop_guard = 0
+        while loop_guard < 365:
+            target_date = today_dt + timedelta(days=assigned_day_offset)
+            if weekday_map[target_date.weekday()] in allowed_set:
+                break
+            assigned_day_offset += 1
+            loop_guard += 1
+
+        target_date_str = target_date.strftime("%Y-%m-%d")
+        t_id = mt.get("id", f"task_{idx}")
+        t_name = mt.get("topic_name") or mt.get("title") or "Scheduled Topic"
+        old_date = mt.get("scheduled_date") or mt.get("date") or "Past Date"
+
+        rescheduled_moves.append({
+            "task_id": t_id,
+            "topic_name": t_name,
+            "subject_name": mt.get("subject_name") or "General",
+            "old_date": old_date,
+            "new_date": target_date_str,
+            "estimated_minutes": mt.get("estimated_minutes") or mt.get("mins") or 45,
+            "priority": mt.get("priority", "medium"),
+            "reason": "Rescheduled from missed date to preserve syllabus coverage"
+        })
+
+        # Distribute at most 2-3 sessions per day to avoid burnout
+        if (idx + 1) % 2 == 0:
+            assigned_day_offset += 1
+            if assigned_day_offset >= learning_days_available:
+                assigned_day_offset = learning_days_available - 1
+
+    trade_offs = []
+    recommendations = []
+
+    if not is_feasible:
+        trade_offs.append(f"At current pace, covering all {len(missed_tasks) + len(future_tasks)} remaining tasks requires {required_daily_hours} hrs/day, exceeding your {daily_available_hours} hrs/day preference.")
+        trade_offs.append("Low-priority drill topics will be compressed into summary revision sessions.")
+        recommendations.append(f"Consider temporarily boosting daily study time from {daily_available_hours} hrs to {min(daily_available_hours + 1.5, required_daily_hours)} hrs.")
+        recommendations.append("Protect the 25% final revision buffer for full-length mock tests.")
+    else:
+        recommendations.append("All missed sessions successfully distributed across upcoming days without exceeding your daily hours.")
+        recommendations.append("Full revision buffer (mock tests & active recall) remains completely intact.")
+
+    feasibility_analysis = {
+        "is_feasible": is_feasible,
+        "days_remaining_to_exam": days_remaining,
+        "revision_buffer_days": revision_buffer_days,
+        "effective_learning_days": learning_days_available,
+        "total_remaining_workload_hours": round(total_remaining_mins / 60, 1),
+        "current_daily_capacity_hours": daily_available_hours,
+        "required_daily_hours": required_daily_hours,
+        "trade_offs": trade_offs,
+        "recommendations": recommendations,
+        "explanation": (
+            f"You have {days_remaining} days until {exam_name}. We detected {missed_count} missed study sessions ({round(missed_mins / 60, 1)} hrs). "
+            f"Rather than piling everything into tomorrow, StudyPilot redistributed your high-priority topics across future sessions while protecting your final {revision_buffer_days}-day revision buffer."
+        )
+    }
+
+    return {
+        "plan_id": f"rec_{secrets.token_hex(6)}",
+        "exam_name": exam_name,
+        "missed_days_count": max(1, missed_count // 2) if missed_count > 0 else 0,
+        "missed_tasks_count": missed_count,
+        "missed_task_ids": [t.get("id") for t in missed_tasks],
+        "rescheduled_tasks": rescheduled_moves,
+        "feasibility_analysis": feasibility_analysis,
+        "analysis_summary": feasibility_analysis["explanation"],
+        "created_at": datetime.now().isoformat()
+    }
+
+
+# =============================================================================
+# 6. AI Exam Trend Analyzer & Important Topics Engine
+# =============================================================================
+
+def compute_pyp_trend_analysis(
+    exam_id: str = "",
+    syllabus_subjects: Optional[List[Dict[str, Any]]] = None,
+    syllabus_topics: Optional[List[Dict[str, Any]]] = None,
+    pyp_papers: Optional[List[Dict[str, Any]]] = None,
+    pyp_questions: Optional[List[Dict[str, Any]]] = None,
+    user_weak_topic_ids: Optional[List[str]] = None,
+    user_weak_topics: Optional[List[str]] = None,
+    **kwargs
+) -> List[Dict[str, Any]]:
+    """
+    Examines previous-year papers against syllabus topics.
+    Calculates exact historical question frequency, assigns categories:
+    - High historical frequency
+    - Moderate historical frequency
+    - Lower historical frequency
+    - Important syllabus fundamentals
+    - Weak areas for current user
+    """
+    user_weak_set = set(user_weak_topic_ids or user_weak_topics or [])
+    papers_list = pyp_papers or []
+    num_papers = max(1, len(papers_list))
+    questions_list = pyp_questions or []
+    total_extracted_q = max(1, len(questions_list))
+
+    # Count question occurrences per topic
+    topic_counts: Dict[str, int] = {}
+    topic_years: Dict[str, set] = {}
+
+    for q in questions_list:
+        tid = q.get("topic_id")
+        tname = q.get("topic_name")
+        paper_id = q.get("paper_id")
+        paper_year = q.get("year")
+        
+        if not paper_year and papers_list:
+            p_match = next((p for p in papers_list if p.get("id") == paper_id), None)
+            paper_year = p_match.get("year", 2024) if p_match else 2024
+        elif not paper_year:
+            paper_year = 2024
+
+        key = tid or tname
+        if key:
+            topic_counts[key] = topic_counts.get(key, 0) + 1
+            if key not in topic_years:
+                topic_years[key] = set()
+            topic_years[key].add(paper_year)
+
+    # Flatten syllabus topics
+    flat_topics: List[Dict[str, Any]] = []
+    if syllabus_topics:
+        for t in syllabus_topics:
+            flat_topics.append({
+                "topic_id": t.get("topic_id") or t.get("id"),
+                "topic_name": t.get("topic_name") or t.get("name") or "Topic",
+                "subject_name": t.get("subject_name") or "General",
+                "importance": t.get("importance") or "medium"
+            })
+    elif syllabus_subjects:
+        for s in syllabus_subjects:
+            s_name = s.get("subject_name") or s.get("name") or "Subject"
+            for u in s.get("units", []):
+                for c in u.get("chapters", []):
+                    for t in c.get("topics", []):
+                        flat_topics.append({
+                            "topic_id": t.get("id") or t.get("topic_id"),
+                            "topic_name": t.get("topic_name") or t.get("name") or "Topic",
+                            "subject_name": s_name,
+                            "importance": t.get("importance") or "medium"
+                        })
+
+    results = []
+    for t in flat_topics:
+        tid = t.get("topic_id")
+        tname = t.get("topic_name") or "Topic"
+        s_name = t.get("subject_name") or "General"
+        
+        freq = topic_counts.get(tid) or topic_counts.get(tname) or 0
+        years = sorted(list(topic_years.get(tid) or topic_years.get(tname) or set()))
+        weightage = round((freq / total_extracted_q) * 100, 1)
+
+        # Categorization logic
+        if tid in user_weak_set or tname in user_weak_set:
+            cat = "weak_spot"
+            rec = "Target with intensive practice; frequent error source in past tests."
+            notes = f"Appeared {freq} times in PYPs ({', '.join(str(y) for y in years) if years else 'various years'}). High priority due to recent test mistakes."
+        elif freq >= 3:
+            cat = "high"
+            rec = "Must-master topic! Consistently tested across multiple exam cycles."
+            notes = f"Appeared in {len(years) or 1} of {num_papers} analyzed papers ({', '.join(str(y) for y in years) if years else 'recent cycles'}). Contributes ~{weightage}% of paper weightage."
+        elif freq >= 2:
+            cat = "moderate"
+            rec = "Core scoring topic. Regularly tested with moderate variation in question types."
+            notes = f"Appeared {freq} times across {', '.join(str(y) for y in years) if years else 'recent cycles'}. Standard application questions are common."
+        elif freq == 1:
+            cat = "lower"
+            rec = "Review fundamentals and standard formulas; lower historical question volume."
+            notes = f"Appeared in paper year {years[0] if years else 'past cycle'}. Do not ignore, but prioritize higher-frequency topics first."
+        else:
+            if t.get("importance") == "high":
+                cat = "fundamental"
+                rec = "Foundational syllabus concept! Even without direct PYP questions, prerequisites depend on it."
+                notes = "Essential conceptual stepping stone required for higher-order topics in this unit."
+            else:
+                cat = "insufficient_data"
+                rec = "Standard syllabus coverage. Maintain regular study without over-indexing."
+                notes = f"Not directly extracted from the {num_papers} analyzed previous-year papers."
+
+        results.append({
+            "id": f"trend_{tid or secrets.token_hex(4)}",
+            "exam_id": exam_id,
+            "topic_id": tid or f"top_{secrets.token_hex(4)}",
+            "subject_name": s_name,
+            "topic_name": tname,
+            "frequency_count": freq,
+            "frequency_category": cat,
+            "importance_category": cat,
+            "years_appeared": years,
+            "weightage_percentage": weightage,
+            "weightage_percent": weightage,
+            "weightage_score": weightage,
+            "evidence_notes": notes,
+            "recommended_action": rec
+        })
+
+    # Sort: weak spots & high first, then moderate, fundamental, lower, insufficient_data
+    order_map = {"weak_spot": 0, "high": 1, "moderate": 2, "fundamental": 3, "lower": 4, "insufficient_data": 5}
+    results.sort(key=lambda x: (order_map.get(x["frequency_category"], 5), -x["frequency_count"]))
+    return results
+
+
+# =============================================================================
+# 7. AI Predicted Practice Paper Generator
+# =============================================================================
+
+async def generate_predicted_practice_paper_content(
+    exam_name: str,
+    education_level: str = "competitive",
+    syllabus: Optional[List[Dict[str, Any]]] = None,
+    trend_data: Optional[List[Dict[str, Any]]] = None,
+    user_weak_topics: Optional[List[str]] = None,
+    mode: str = "exam_pattern",
+    num_questions: int = 20,
+    duration_mins: int = 60,
+    api_key: Optional[str] = None,
+    topics: Optional[List[Dict[str, Any]]] = None,
+    generation_mode: Optional[str] = None,
+    weak_topics: Optional[List[str]] = None,
+    subject_name: Optional[str] = None,
+    **kwargs
+) -> Dict[str, Any]:
+    """
+    Generates syllabus-based practice papers informed by historical examination patterns:
+    Modes:
+    - exam_pattern: Mimics the configured examination format.
+    - high_priority: Focuses on historically recurring topics.
+    - full_syllabus: Balanced coverage across all subjects.
+    - weak_areas: Targets user's lower-performing topics.
+    - revision_paper: Covers previously studied material.
+    - last_minute: Essential high-yield concepts within time remaining.
+    """
+    if syllabus is None and topics is not None:
+        syllabus = topics
+    if syllabus is None:
+        syllabus = []
+    if trend_data is None:
+        trend_data = []
+    if user_weak_topics is None and weak_topics is not None:
+        user_weak_topics = weak_topics
+    if user_weak_topics is None:
+        user_weak_topics = []
+    if generation_mode is not None:
+        mode = generation_mode
+    profile = get_level_profile(education_level)
+    level_name = profile["name"]
+    q_count = max(5, min(50, num_questions))
+
+    # Mode title & emphasis
+    mode_titles = {
+        "exam_pattern": f"🎯 Standard Examination Pattern Predicted Paper ({exam_name})",
+        "high_priority": f"🔥 High-Yield & Historically Recurring Topics Paper ({exam_name})",
+        "full_syllabus": f"🌐 Comprehensive Full-Syllabus Predicted Paper ({exam_name})",
+        "weak_areas": f"💡 Weak-Area Reinforcement & Diagnostic Paper ({exam_name})",
+        "revision_paper": f"🔁 Spaced Retention Revision Practice Paper ({exam_name})",
+        "last_minute": f"⚡ Last-Minute High-Impact Essentials Paper ({exam_name})"
+    }
+    title = mode_titles.get(mode, f"AI Predicted Practice Paper — {exam_name}")
+
+    # Gather priority topics based on mode
+    priority_topics = []
+    if mode == "weak_areas" and user_weak_topics:
+        priority_topics = user_weak_topics[:q_count]
+    elif mode == "high_priority":
+        priority_topics = [t["topic_name"] for t in trend_data if t.get("frequency_category") in ["high", "moderate"]][:q_count]
+
+    if not priority_topics:
+        # Fallback to general topics across syllabus
+        for s in syllabus:
+            s_name = s.get("subject_name") or s.get("name") or "Subject"
+            for u in s.get("units", []):
+                for c in u.get("chapters", []):
+                    for t in c.get("topics", []):
+                        priority_topics.append(t.get("topic_name") or t.get("name") or "Topic")
+
+    if not priority_topics:
+        priority_topics = [f"{exam_name} Core Concept {i+1}" for i in range(q_count)]
+
+    # Generate questions using LLM or heuristic generator
+    system_instruction = (
+        f"You are StudyPilot's Examination Prediction Engine. "
+        f"Generate a balanced {q_count}-question predicted paper for {exam_name} at {level_name} level. "
+        f"Mode: {mode}. Return ONLY a JSON list of questions."
+    )
+
+    prompt = f"""
+    Create {q_count} questions for predicted practice paper:
+    Exam: "{exam_name}"
+    Level: "{level_name}"
+    Mode: "{mode}"
+    Target Topics: {priority_topics[:15]}
+
+    Return ONLY a JSON array with objects matching:
+    [
+        {{
+            "id": "pred_q_1",
+            "question_text": "High-yield examination style question...",
+            "options": ["Option A", "Option B", "Option C", "Option D"],
+            "correct_answer": "Option B",
+            "correct_index": 1,
+            "explanation": "Thorough step-by-step solution...",
+            "topic_name": "Topic from target list",
+            "subject_name": "Subject Name",
+            "marks": 2.0,
+            "negative_marks": 0.5,
+            "difficulty": "exam_level"
+        }}
+    ]
+    """
+
+    llm_output = await call_llm(prompt, api_key=api_key, system_instruction=system_instruction, json_mode=True)
+    questions = []
+    if llm_output:
+        try:
+            cleaned = llm_output.strip()
+            if cleaned.startswith("```json"):
+                cleaned = cleaned[7:]
+            if cleaned.startswith("```"):
+                cleaned = cleaned[3:]
+            if cleaned.endswith("```"):
+                cleaned = cleaned[:-3]
+            parsed = json.loads(cleaned.strip())
+            if isinstance(parsed, dict) and "questions" in parsed:
+                parsed = parsed["questions"]
+            if isinstance(parsed, list) and len(parsed) > 0:
+                questions = parsed
+        except Exception:
+            pass
+
+    if not questions:
+        # Heuristic Generator
+        used_qs = set()
+        for i in range(q_count):
+            t_name = priority_topics[i % len(priority_topics)]
+            q = generate_heuristic_question(
+                topic_name=t_name,
+                subject_name="General",
+                question_index=i + 1,
+                total_requested=q_count,
+                used_questions=used_qs,
+                difficulty="moderate"
+            )
+            q["id"] = f"pred_q_{i+1}_{secrets.token_hex(2)}"
+            q["topic_name"] = t_name
+            q["subject_name"] = "Core Syllabus"
+            q["marks"] = 2.0
+            q["negative_marks"] = 0.5
+            questions.append(q)
+
+    total_marks = sum(q.get("marks", 2.0) for q in questions)
+
+    return {
+        "id": f"pred_{secrets.token_hex(6)}",
+        "title": title,
+        "generation_mode": mode,
+        "education_level": education_level,
+        "exam_name": exam_name,
+        "duration_minutes": duration_mins,
+        "total_questions": len(questions),
+        "total_marks": total_marks,
+        "negative_marking_enabled": True,
+        "disclaimer": "AI-generated predicted practice paper — not an official examination paper or a guaranteed prediction of the upcoming exam. Historical patterns are evidence for practice planning, not a guarantee of future questions.",
+        "questions": questions,
+        "created_at": datetime.now().isoformat()
+    }
+

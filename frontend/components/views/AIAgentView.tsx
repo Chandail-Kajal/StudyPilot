@@ -139,12 +139,17 @@ export const AIAgentView: React.FC<AIAgentViewProps> = ({
   }, [activeTab, token]);
 
   // Save API key
-  const handleSaveApiKey = (key: string) => {
+  const handleSaveApiKey = async (key: string) => {
     setApiKey(key);
     if (typeof window !== 'undefined') {
       localStorage.setItem('studypilot.ai_api_key', key);
     }
-    showToast('AI API Key saved successfully');
+    if (token) {
+      try {
+        await api.saveAiKey(key, token);
+      } catch (e) {}
+    }
+    showToast('AI API Key saved and synced successfully');
   };
 
   // Preset capacity clicks

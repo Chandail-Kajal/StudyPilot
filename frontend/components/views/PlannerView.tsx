@@ -1,14 +1,18 @@
+/* eslint-disable react-hooks/exhaustive-deps */
+/* eslint-disable react-hooks/set-state-in-effect */
 'use client';
 
 import React, { useState, useEffect } from 'react';
 import { StudyPlan, Task } from '@/types';
 import { addDays, fmtShort, fmtWd, parse, weekStartOf, today, fmtMins } from '@/lib/seed';
 import { Icon } from '../Icons';
+import { FullSyllabusTestModule } from '../FullSyllabusTestModule';
 
 interface PlannerViewProps {
   plan: StudyPlan;
   weekStart: string;
   subjectFilter: string;
+  token?: string | null;
   onFilterChange: (subjectId: string) => void;
   onWeekChange: (newStart: string) => void;
   onAddTask: (date: string) => void;
@@ -17,12 +21,17 @@ interface PlannerViewProps {
   onMoveTask: (taskId: string, newDate: string) => void;
   onOpenTouchMove: (task: Task) => void;
   onOpenAIPlanner?: () => void;
+  onUpdatePlan?: (plan: StudyPlan) => void;
+  onNavigateToView?: (view: string) => void;
+  showToast?: (msg: string) => void;
+  onStartFocusSession?: (mins: number, subjectId?: string) => void;
 }
 
 export const PlannerView: React.FC<PlannerViewProps> = ({
   plan,
   weekStart,
   subjectFilter,
+  token,
   onFilterChange,
   onWeekChange,
   onAddTask,
@@ -30,7 +39,11 @@ export const PlannerView: React.FC<PlannerViewProps> = ({
   onToggleTask,
   onMoveTask,
   onOpenTouchMove,
-  onOpenAIPlanner
+  onOpenAIPlanner,
+  onUpdatePlan,
+  onNavigateToView,
+  showToast,
+  onStartFocusSession
 }) => {
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
   const [dragOverDate, setDragOverDate] = useState<string | null>(null);
@@ -122,10 +135,87 @@ export const PlannerView: React.FC<PlannerViewProps> = ({
     setDragOverDate(null);
   };
 
+  const [plannerSubTab, setPlannerSubTab] = useState<'schedule' | 'full_tests'>('schedule');
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-      {/* Top Header */}
-      <div className="pagehead">
+      {/* Planner Sub-Navigation Tabs */}
+      <div style={{ display: 'flex', gap: '10px', borderBottom: '1px solid var(--line)', paddingBottom: '12px', flexWrap: 'wrap' }}>
+        <button
+          className={`btn ${plannerSubTab === 'schedule' ? 'primary' : ''}`}
+          onClick={() => setPlannerSubTab('schedule')}
+          style={{ display: 'flex', alignItems: 'center', gap: '8px', height: '40px' }}
+        >
+          <Icon name="planner" size={16} />
+          <span>Weekly Schedule</span>
+        </button>
+
+        <button
+          className={`btn ${plannerSubTab === 'full_tests' ? 'primary' : ''}`}
+          onClick={() => setPlannerSubTab('full_tests')}
+          style={{ display: 'flex', alignItems: 'center', gap: '8px', height: '40px' }}
+        >
+          <span>🎯</span>
+          <span>Focus Time & Complete Syllabus Tests</span>
+          <span
+            style={{
+              fontSize: '11px',
+              padding: '2px 8px',
+              borderRadius: '10px',
+              fontWeight: 700,
+              background: plannerSubTab === 'full_tests' ? 'rgba(255,255,255,0.25)' : 'var(--good-soft)',
+              color: plannerSubTab === 'full_tests' ? '#fff' : 'var(--good)'
+            }}
+          >
+            60m & 3h Tests
+          </span>
+        </button>
+      </div>
+
+      {plannerSubTab === 'full_tests' ? (
+        <FullSyllabusTestModule
+          plan={plan}
+          token={token}
+          onUpdatePlan={onUpdatePlan || (() => {})}
+          onNavigateToView={onNavigateToView || (() => {})}
+          showToast={showToast || (() => {})}
+          onStartFocusSession={onStartFocusSession}
+        />
+      ) : (
+        <>
+          {/* Quick Full Syllabus Test Banner */}
+          <div
+            style={{
+              padding: '14px 18px',
+              borderRadius: '12px',
+              background: 'linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%)',
+              border: '1px solid var(--line)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '12px'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <span style={{ fontSize: '24px' }}>🏆</span>
+              <div>
+                <span style={{ fontWeight: 700, fontSize: '14px' }}>Complete Syllabus Mock Testing & Focus Hub</span>
+                <p style={{ margin: 0, fontSize: '12px', color: 'var(--muted)' }}>
+                  Take full 60-Minute rapid tests or 3-Hour grand examinations across Easy, Moderate & Difficult tiers.
+                </p>
+              </div>
+            </div>
+            <button
+              className="btn primary sm"
+              onClick={() => setPlannerSubTab('full_tests')}
+            >
+              Open Full Syllabus Tests ➡
+            </button>
+          </div>
+
+          {/* Top Header */}
+          <div className="pagehead">
         <div>
           <p className="eyebrow">Weekly planner</p>
           <h1>{fmtShort(days[0])} to {fmtShort(days[6])}</h1>
@@ -172,6 +262,32 @@ export const PlannerView: React.FC<PlannerViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Zero Dummy Data Syllabus Upload Prompt */}
+      {plan.subjects.length === 0 && (
+        <div
+          style={{
+            padding: '24px 20px',
+            borderRadius: '14px',
+            background: 'var(--surface2)',
+            border: '2px dashed var(--accent)',
+            textAlign: 'center',
+            marginBottom: '16px'
+          }}
+        >
+          <div style={{ fontSize: '32px', marginBottom: '8px' }}>📂</div>
+          <h3 style={{ fontSize: '18px', margin: '0 0 6px 0' }}>No Syllabus Uploaded Yet</h3>
+          <p style={{ margin: '0 auto 14px auto', maxWidth: '480px', fontSize: '13px', color: 'var(--muted)', lineHeight: '1.4' }}>
+            Upload your syllabus in PDF, Excel (.xlsx/.xls), or CSV format to automatically extract your subjects, chapters, and topics, create your weekly schedule, and generate subject-wise mock tests.
+          </p>
+          <button
+            className="btn primary sm"
+            onClick={() => setPlannerSubTab('full_tests')}
+          >
+            Upload Syllabus File (PDF/Excel/CSV)
+          </button>
+        </div>
+      )}
 
       {/* Week Totals */}
       <div className="weeksum">
@@ -387,6 +503,8 @@ export const PlannerView: React.FC<PlannerViewProps> = ({
           );
         })}
       </div>
+      </>
+      )}
     </div>
   );
 };

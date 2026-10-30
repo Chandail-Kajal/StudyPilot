@@ -1,25 +1,30 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { Subject, Task, ExamInfo, TimerSettings, StudyPlan } from '@/types';
+import React, { useState, useEffect, useRef } from 'react';
+import { Subject, Task, ExamInfo, TimerSettings, StudyPlan, SyllabusParseResult } from '@/types';
 import { COLORS, clamp, today, addDays, parse, fmtWd, fmtShort, weekStartOf } from '@/lib/seed';
+import { api } from '@/lib/api';
 import { Icon } from './Icons';
 
 interface AuthModalProps {
   isOpen: boolean;
   initialMode?: 'login' | 'register' | 'forgot';
+  prefillToken?: string;
+  prefillEmail?: string;
   onClose: () => void;
   onLogin: (data: { email: string; password: string }) => Promise<void>;
   onRegister: (data: {
     name: string;
     email: string;
     password: string;
+    role?: 'student' | 'competitive_exam' | 'professional';
     exam_name?: string;
     exam_date?: string;
     goal_mins?: number;
     importCurrentPlan?: boolean;
+    prototype_data?: any;
   }) => Promise<void>;
-  onForgotPassword: (email: string) => Promise<string>;
+  onForgotPassword: (email: string) => Promise<any>;
   onResetPassword: (token: string, newPassword: string) => Promise<void>;
   hasLocalPlan?: boolean;
 }
@@ -27,6 +32,8 @@ interface AuthModalProps {
 export const AuthModal: React.FC<AuthModalProps> = ({
   isOpen,
   initialMode = 'login',
+  prefillToken,
+  prefillEmail,
   onClose,
   onLogin,
   onRegister,
@@ -44,8 +51,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [name, setName] = useState('');
-  const [examName, setExamName] = useState('Mid-term exams');
-  const [examDate, setExamDate] = useState(addDays(today(), 23));
+  const [selectedRole, setSelectedRole] = useState<'student' | 'competitive_exam' | 'professional'>('competitive_exam');
+  const [examName, setExamName] = useState('Competitive Examination');
+  const [examDate, setExamDate] = useState(addDays(today(), 28));
   const [goalMins, setGoalMins] = useState(180);
   const [importCurrentPlan, setImportCurrentPlan] = useState(hasLocalPlan);
 
@@ -54,13 +62,54 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [newPassword, setNewPassword] = useState('');
   const [forgotStep, setForgotStep] = useState<1 | 2>(1);
 
+  // Syllabus file upload & analysis states
+  const [syllabusFile, setSyllabusFile] = useState<File | null>(null);
+  const [isParsingSyllabus, setIsParsingSyllabus] = useState<boolean>(false);
+  const [parsedSyllabus, setParsedSyllabus] = useState<SyllabusParseResult | null>(null);
+  const [syllabusDragOver, setSyllabusDragOver] = useState<boolean>(false);
+  const [syllabusError, setSyllabusError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     setTab(initialMode);
     setError(null);
     setSuccess(null);
-  }, [initialMode, isOpen]);
+    setSyllabusError(null);
+    if (prefillEmail) setEmail(prefillEmail);
+    if (prefillToken) {
+      setResetToken(prefillToken);
+      setForgotStep(2);
+      setSuccess('Reset token verified from email link. Please set your new password below.');
+    } else {
+      setForgotStep(1);
+    }
+  }, [initialMode, isOpen, prefillToken, prefillEmail]);
 
   if (!isOpen) return null;
+
+  const handleProcessSyllabusFile = async (file: File) => {
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    if (!ext || !['pdf', 'xlsx', 'xls', 'csv'].includes(ext)) {
+      setSyllabusError('Unsupported format. Please upload a PDF, Excel (.xlsx/.xls), or CSV file.');
+      return;
+    }
+    setSyllabusError(null);
+    setSyllabusFile(file);
+    setIsParsingSyllabus(true);
+    try {
+      const res = await api.parseAndPlanSyllabus(file, {
+        exam_name: examName,
+        exam_date: examDate,
+        daily_goal_mins: goalMins
+      });
+      setParsedSyllabus(res);
+      setSuccess(`Syllabus analyzed! Extracted ${res.subjects_count} subjects and ${res.topics_count} topics.`);
+    } catch (err: any) {
+      setSyllabusError(err.message || 'Could not parse syllabus file. Please verify the document format.');
+    } finally {
+      setIsParsingSyllabus(false);
+    }
+  };
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -85,10 +134,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         name,
         email,
         password,
+        role: selectedRole,
         exam_name: examName,
         exam_date: examDate,
         goal_mins: goalMins,
-        importCurrentPlan
+        importCurrentPlan: parsedSyllabus ? false : importCurrentPlan,
+        prototype_data: parsedSyllabus?.plan
       });
       onClose();
     } catch (err: any) {
@@ -104,15 +155,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setLoading(true);
     try {
       if (forgotStep === 1) {
-        const token = await onForgotPassword(email);
-        setResetToken(token);
+        const res = await onForgotPassword(email);
+        const msg = typeof res === 'object' && res?.message
+          ? res.message
+          : `A password reset link has been dispatched to your registered email address (${email}). Please check your inbox or spam folder.`;
+
         setForgotStep(2);
-        setSuccess('Reset token generated. Enter a new password below.');
+        setSuccess(msg);
       } else {
         await onResetPassword(resetToken, newPassword);
         setSuccess('Password updated successfully! Please sign in with your new password.');
         setTab('login');
         setForgotStep(1);
+        setPassword('');
       }
     } catch (err: any) {
       setError(err.message || 'Operation failed. Please try again.');
@@ -186,17 +241,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </label>
 
             <label className="f">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span>Password</span>
-                <button
-                  type="button"
-                  className="linkbtn"
-                  onClick={() => { setTab('forgot'); setError(null); setSuccess(null); }}
-                  style={{ fontSize: '12px' }}
-                >
-                  Forgot password?
-                </button>
-              </div>
+              Password
               <div style={{ position: 'relative' }}>
                 <input
                   type={showPassword ? 'text' : 'password'}
@@ -216,6 +261,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </button>
               </div>
             </label>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '-8px', marginBottom: '8px' }}>
+              <button
+                type="button"
+                className="linkbtn"
+                onClick={() => { setTab('forgot'); setError(null); setSuccess(null); }}
+                style={{ fontSize: '12.5px', color: 'var(--accent)' }}
+              >
+                Forgot Password?
+              </button>
+            </div>
 
             <div style={{ marginTop: '8px' }}>
               <button className="btn primary" type="submit" style={{ width: '100%', height: '44px' }} disabled={loading}>
@@ -241,7 +297,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <input
                 type="text"
                 required
-                placeholder="e.g. Kajal Sharma"
+                placeholder="e.g. John Doe"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
               />
@@ -282,12 +338,96 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
             </label>
 
+            <div style={{ marginBottom: '14px' }}>
+              <label className="f" style={{ marginBottom: '6px', fontSize: '13px', fontWeight: 600 }}>
+                Select Your Role / Goal
+              </label>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedRole('student');
+                    if (examName === 'Competitive Examination') setExamName('Semester / Board Exams');
+                  }}
+                  style={{
+                    padding: '10px 6px',
+                    borderRadius: '8px',
+                    border: `2px solid ${selectedRole === 'student' ? 'var(--accent)' : 'var(--line)'}`,
+                    background: selectedRole === 'student' ? 'var(--accent-soft)' : 'var(--surface2)',
+                    cursor: 'pointer',
+                    textAlign: 'center',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}
+                >
+                  <span style={{ fontSize: '18px' }}>🎓</span>
+                  <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--ink)' }}>Student</span>
+                  <span style={{ fontSize: '10px', color: 'var(--muted)', lineHeight: '1.2' }}>School / College</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedRole('competitive_exam');
+                    if (examName === 'Semester / Board Exams') setExamName('Target Competitive Exam');
+                  }}
+                  style={{
+                    padding: '10px 6px',
+                    borderRadius: '8px',
+                    border: `2px solid ${selectedRole === 'competitive_exam' ? 'var(--accent)' : 'var(--line)'}`,
+                    background: selectedRole === 'competitive_exam' ? 'var(--accent-soft)' : 'var(--surface2)',
+                    cursor: 'pointer',
+                    textAlign: 'center',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}
+                >
+                  <span style={{ fontSize: '18px' }}>🏆</span>
+                  <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--ink)' }}>Competitive</span>
+                  <span style={{ fontSize: '10px', color: 'var(--muted)', lineHeight: '1.2' }}>JEE / NEET / UPSC</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedRole('professional');
+                    if (examName === 'Semester / Board Exams' || examName === 'Competitive Examination') setExamName('Certification Exam');
+                  }}
+                  style={{
+                    padding: '10px 6px',
+                    borderRadius: '8px',
+                    border: `2px solid ${selectedRole === 'professional' ? 'var(--accent)' : 'var(--line)'}`,
+                    background: selectedRole === 'professional' ? 'var(--accent-soft)' : 'var(--surface2)',
+                    cursor: 'pointer',
+                    textAlign: 'center',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}
+                >
+                  <span style={{ fontSize: '18px' }}>💼</span>
+                  <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--ink)' }}>Professional</span>
+                  <span style={{ fontSize: '10px', color: 'var(--muted)', lineHeight: '1.2' }}>Certifications</span>
+                </button>
+              </div>
+              <div style={{ marginTop: '6px', fontSize: '11px', color: 'var(--muted)' }}>
+                {selectedRole === 'competitive_exam' && '⚡ Competitive Mode: +4 / -1 negative marking enabled, strict timing discipline.'}
+                {selectedRole === 'student' && '📘 Student Mode: Standard 1-mark grading without negative deduction, conceptual clarity focus.'}
+                {selectedRole === 'professional' && '💼 Professional Mode: Applied scenario questions and industry certification benchmarks.'}
+              </div>
+            </div>
+
             <div className="row2">
               <label className="f">
                 Exam target
                 <input
                   type="text"
-                  placeholder="e.g. Mid-term exams"
+                  placeholder={selectedRole === 'student' ? 'e.g. CBSE 12th Board' : selectedRole === 'competitive_exam' ? 'e.g. JEE Advanced / NEET' : 'e.g. AWS Solutions Architect'}
                   value={examName}
                   onChange={(e) => setExamName(e.target.value)}
                 />
@@ -302,7 +442,136 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </label>
             </div>
 
-            {hasLocalPlan && (
+            {/* Syllabus Upload Dropzone & Analysis */}
+            <div style={{ marginTop: '4px', marginBottom: '8px' }}>
+              <label className="f" style={{ marginBottom: '6px' }}>
+                <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span>Upload Syllabus (PDF or Excel) <span style={{ color: 'var(--muted)', fontSize: '11px', fontWeight: 'normal' }}>(Optional)</span></span>
+                  {parsedSyllabus && (
+                    <span style={{ fontSize: '11px', color: 'var(--good)', fontWeight: 600 }}>
+                      ✓ {parsedSyllabus.subjects_count} Subjects Found
+                    </span>
+                  )}
+                </span>
+              </label>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,.xlsx,.xls,.csv"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  if (e.target.files && e.target.files[0]) {
+                    handleProcessSyllabusFile(e.target.files[0]);
+                  }
+                }}
+              />
+
+              {!parsedSyllabus ? (
+                <div
+                  onDragOver={(e) => { e.preventDefault(); setSyllabusDragOver(true); }}
+                  onDragLeave={() => setSyllabusDragOver(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setSyllabusDragOver(false);
+                    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                      handleProcessSyllabusFile(e.dataTransfer.files[0]);
+                    }
+                  }}
+                  onClick={() => fileInputRef.current?.click()}
+                  style={{
+                    border: `2px dashed ${syllabusDragOver ? 'var(--accent)' : 'var(--border)'}`,
+                    borderRadius: '10px',
+                    padding: '16px',
+                    textAlign: 'center',
+                    cursor: 'pointer',
+                    background: syllabusDragOver ? 'var(--surface2)' : 'var(--surface)',
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  {isParsingSyllabus ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                      <div className="spinner" style={{ width: '22px', height: '22px' }} />
+                      <span style={{ fontSize: '13px', color: 'var(--accent)', fontWeight: 500 }}>
+                        Analyzing syllabus & building personalized study plan...
+                      </span>
+                    </div>
+                  ) : (
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                        <span style={{ fontSize: '18px' }}>📄</span>
+                        <span style={{ fontSize: '13px', fontWeight: 600 }}>Click to browse or drop syllabus file</span>
+                      </div>
+                      <p style={{ margin: 0, fontSize: '11px', color: 'var(--muted)' }}>
+                        PDF, Excel (.xlsx, .xls), or CSV • Auto-creates subjects, topics & daily plan
+                      </p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div style={{
+                  padding: '12px 14px',
+                  borderRadius: '10px',
+                  background: 'var(--surface2)',
+                  border: '1px solid var(--border)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '18px' }}>📚</span>
+                      <div>
+                        <div style={{ fontSize: '13px', fontWeight: 600 }}>{parsedSyllabus.filename}</div>
+                        <div style={{ fontSize: '11px', color: 'var(--muted)' }}>
+                          {parsedSyllabus.subjects_count} subjects • {parsedSyllabus.topics_count} topics • {parsedSyllabus.tasks_count} study tasks
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="linkbtn"
+                      onClick={() => {
+                        setParsedSyllabus(null);
+                        setSyllabusFile(null);
+                        if (fileInputRef.current) fileInputRef.current.value = '';
+                      }}
+                      style={{ fontSize: '11px', color: 'var(--bad)' }}
+                    >
+                      Change
+                    </button>
+                  </div>
+
+                  {/* Subject Pills Preview */}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginTop: '2px' }}>
+                    {parsedSyllabus.plan.subjects.map(s => (
+                      <span
+                        key={s.id}
+                        style={{
+                          fontSize: '11px',
+                          padding: '2px 8px',
+                          borderRadius: '12px',
+                          background: `${s.color}22`,
+                          color: s.color,
+                          fontWeight: 500,
+                          border: `1px solid ${s.color}44`
+                        }}
+                      >
+                        {s.name} ({s.topics.length})
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {syllabusError && (
+                <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: 'var(--bad)' }}>
+                  {syllabusError}
+                </p>
+              )}
+            </div>
+
+            {hasLocalPlan && !parsedSyllabus && (
               <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', marginTop: '4px' }}>
                 <input
                   type="checkbox"
@@ -315,8 +584,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             )}
 
             <div style={{ marginTop: '8px' }}>
-              <button className="btn primary" type="submit" style={{ width: '100%', height: '44px' }} disabled={loading}>
-                {loading ? 'Creating account...' : 'Create Account'}
+              <button className="btn primary" type="submit" style={{ width: '100%', height: '44px' }} disabled={loading || isParsingSyllabus}>
+                {loading ? 'Creating account...' : parsedSyllabus ? 'Create Account & Generate Study Plan' : 'Create Account'}
               </button>
             </div>
 
@@ -333,15 +602,21 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
         {tab === 'forgot' && (
           <form className="form" onSubmit={handleForgotSubmit}>
-            <p className="hint" style={{ marginBottom: '8px' }}>
-              {forgotStep === 1
-                ? 'Enter your registered email address and we will generate a password reset code.'
-                : 'Enter your new password below.'}
-            </p>
+            <div style={{ marginBottom: '14px', padding: '12px 14px', borderRadius: '10px', background: 'var(--surface2)', border: '1px solid var(--line)' }}>
+              <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--ink)', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span>✉️</span>
+                <span>Registered Email Verification</span>
+              </div>
+              <p className="hint" style={{ margin: 0, fontSize: '12px', lineHeight: 1.5 }}>
+                {forgotStep === 1
+                  ? 'Enter your registered email address. StudyPilot will send a secure password reset link to your registered inbox.'
+                  : `A reset code was dispatched to ${email || 'your registered email'}. Enter your new password below.`}
+              </p>
+            </div>
 
             {forgotStep === 1 ? (
               <label className="f">
-                Registered email
+                Registered email address
                 <input
                   type="email"
                   required
@@ -353,10 +628,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             ) : (
               <>
                 <label className="f">
-                  Reset code / token
+                  Reset code / token from email
                   <input
                     type="text"
                     required
+                    placeholder="rst_..."
                     value={resetToken}
                     onChange={(e) => setResetToken(e.target.value)}
                   />
@@ -375,7 +651,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </>
             )}
 
-            <div className="formactions">
+            <div className="formactions" style={{ marginTop: '16px' }}>
               <button
                 type="button"
                 className="btn"
@@ -384,7 +660,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 Back to sign in
               </button>
               <button className="btn primary" type="submit" disabled={loading}>
-                {loading ? 'Processing...' : forgotStep === 1 ? 'Send reset code' : 'Reset password'}
+                {loading ? 'Processing...' : forgotStep === 1 ? 'Send reset link to email' : 'Reset password & sign in'}
               </button>
             </div>
           </form>

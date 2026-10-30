@@ -1,10 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { StudyPlan, User, UserStats } from '@/types';
 import { fmtMins, fmtShort, parse } from '@/lib/seed';
 import { Icon } from '../Icons';
+import { api } from '@/lib/api';
 
 interface AccountViewProps {
   user: User | null;
@@ -57,6 +58,51 @@ export const AccountView: React.FC<AccountViewProps> = ({
   const [confirmPassword, setConfirmPassword] = useState('');
   const [pwdLoading, setPwdLoading] = useState(false);
   const [pwdMsg, setPwdMsg] = useState<{ text: string; error: boolean } | null>(null);
+
+  // AI API Key configuration state
+  const [apiKey, setApiKey] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('studypilot.ai_api_key') || '';
+    }
+    return '';
+  });
+  const [keyStatus, setKeyStatus] = useState<any>(null);
+  const [savingKey, setSavingKey] = useState(false);
+  const [keySavedMsg, setKeySavedMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('studypilot.auth_token') : null;
+    if (token) {
+      api.getAiKeyStatus(token)
+        .then(res => {
+          setKeyStatus(res);
+        })
+        .catch(() => {});
+    }
+  }, []);
+
+  const handleSaveApiKey = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingKey(true);
+    setKeySavedMsg(null);
+    try {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('studypilot.ai_api_key', apiKey.trim());
+      }
+      const token = typeof window !== 'undefined' ? localStorage.getItem('studypilot.auth_token') : null;
+      if (token) {
+        await api.saveAiKey(apiKey.trim(), token);
+        const updatedStatus = await api.getAiKeyStatus(token);
+        setKeyStatus(updatedStatus);
+      }
+      setKeySavedMsg('AI API Key saved and activated successfully!');
+      setTimeout(() => setKeySavedMsg(null), 4000);
+    } catch (err: any) {
+      setKeySavedMsg('Failed to save API key: ' + (err.message || 'Error'));
+    } finally {
+      setSavingKey(false);
+    }
+  };
 
   // Syncing state
   const [manualSyncing, setManualSyncing] = useState(false);
@@ -490,6 +536,67 @@ export const AccountView: React.FC<AccountViewProps> = ({
           </form>
         </section>
       )}
+
+      {/* AI API Key Configuration */}
+      <section className="card">
+        <div className="cardhead" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <h2>AI API Key & Model Configuration</h2>
+            <p className="sub" style={{ margin: '4px 0 0 0' }}>
+              Power dynamic timetable generation, interactive topic content, and mock tests with Google Gemini or OpenAI.
+            </p>
+          </div>
+          {keyStatus?.is_configured ? (
+            <span className="pill good" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: 'var(--good)' }}></span>
+              Live AI Active ({keyStatus.provider})
+            </span>
+          ) : (
+            <span className="pill neutral">Built-in AI Fallback</span>
+          )}
+        </div>
+
+        <form className="form" onSubmit={handleSaveApiKey} style={{ marginTop: '16px' }}>
+          <label className="f">
+            <span>Google Gemini or OpenAI API Key</span>
+            <input
+              type="password"
+              placeholder={keyStatus?.masked_key ? `Configured: ${keyStatus.masked_key}` : "Enter Gemini API key (AIzaSy...) or OpenAI (sk-...)"}
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+            />
+            <span style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '4px' }}>
+              StudyPilot uses your API key to generate customized syllabi timetables, interactive lesson notes, and CBT mock exam papers.
+            </span>
+          </label>
+
+          {keySavedMsg && (
+            <div className={`alert-banner ${keySavedMsg.includes('Failed') ? 'error' : 'success'}`}>
+              <span>{keySavedMsg}</span>
+            </div>
+          )}
+
+          <div className="formactions" style={{ display: 'flex', gap: '10px' }}>
+            <button className="btn primary" type="submit" disabled={savingKey}>
+              {savingKey ? 'Saving...' : 'Save AI Key'}
+            </button>
+            {apiKey && (
+              <button
+                type="button"
+                className="btn secondary"
+                onClick={() => {
+                  setApiKey('');
+                  if (typeof window !== 'undefined') localStorage.removeItem('studypilot.ai_api_key');
+                  const token = typeof window !== 'undefined' ? localStorage.getItem('studypilot.auth_token') : null;
+                  if (token) api.saveAiKey('', token).then(() => api.getAiKeyStatus(token).then(setKeyStatus));
+                }}
+              >
+                Clear Key
+              </button>
+            )}
+          </div>
+        </form>
+      </section>
 
       {/* Danger Zone */}
       <section className="card" style={{ borderColor: 'var(--crit-soft)' }}>
