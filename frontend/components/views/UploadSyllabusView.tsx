@@ -130,7 +130,7 @@ export const UploadSyllabusView: React.FC<UploadSyllabusViewProps> = ({
         }
       }
 
-      setProcessingStep('AI reading and extracting syllabus content...');
+      setProcessingStep('Reading and extracting syllabus content...');
 
       let previewRes;
       let filename = 'syllabus';
@@ -145,7 +145,7 @@ export const UploadSyllabusView: React.FC<UploadSyllabusViewProps> = ({
         filename = 'manual_syllabus.txt';
         fileFormat = 'txt';
       } else if (file) {
-        setProcessingStep('AI structuring subjects, units, chapters & learning objectives...');
+        setProcessingStep('Structuring subjects, units, chapters & topics...');
         previewRes = await api.uploadSyllabusPreview(token, file, {
           exam_id: targetExamId,
           exam_name: targetExamName,
@@ -156,7 +156,10 @@ export const UploadSyllabusView: React.FC<UploadSyllabusViewProps> = ({
       }
 
       setProcessingStep('Finalizing curriculum preview...');
-      showToast(`AI extracted ${previewRes?.summary?.total_rows || 0} syllabus topics!`);
+      const topicCount = previewRes?.summary?.total_rows || 0;
+      showToast(previewRes?.analysis_source === 'live_ai'
+        ? `AI analyzed and extracted ${topicCount} syllabus topics.`
+        : `Extracted ${topicCount} syllabus topics using ${previewRes?.analysis_source === 'structured_file' ? 'structured file parsing' : 'local text parsing'}.`);
 
       // Hand off to review preview
       onPreviewExtracted(previewRes, targetExamId, filename, fileFormat);
@@ -178,7 +181,7 @@ export const UploadSyllabusView: React.FC<UploadSyllabusViewProps> = ({
           <h1 style={{ margin: 0, fontSize: '26px', fontWeight: 800 }}>Upload Examination Syllabus</h1>
         </div>
         <p style={{ margin: '6px 0 0', color: 'var(--muted)', fontSize: '14.5px', lineHeight: 1.5 }}>
-          Upload your syllabus document in <b>PDF, Excel (.xlsx/.xls), or CSV</b> format. StudyPilot AI automatically extracts subjects, units, chapters, and topics to generate your personalized study timetable.
+          Upload a PDF, Excel, CSV, Word, text, or syllabus image. Structured files are parsed locally; readable text uses your configured AI provider when available, with local parsing as a fallback. Confirming the topics creates your study schedule.
         </p>
       </div>
 

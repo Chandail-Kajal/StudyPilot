@@ -174,7 +174,9 @@ def parse_and_preview_syllabus(
     default_subject: Optional[str] = None,
     scope: str = "complete",  # "complete" or "subject"
     custom_mapping: Optional[Dict[str, str]] = None,
-    existing_topics: Optional[List[str]] = None
+    existing_topics: Optional[List[str]] = None,
+    preparsed_rows: Optional[List[Dict[str, Any]]] = None,
+    analysis_source: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Standardized multi-format preview parser.
@@ -193,8 +195,10 @@ def parse_and_preview_syllabus(
     active_exam = exam_name or "Target Examination"
     fallback_subject = (default_subject.strip() if default_subject and default_subject.strip() else None)
 
+    if preparsed_rows is not None:
+        raw_rows = preparsed_rows
     # 1. Excel (.xlsx)
-    if ext == "xlsx":
+    elif ext == "xlsx":
         wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
         # Check if sheets represent subjects
         valid_sheets = [s for s in wb.sheetnames if s.strip().lower() not in ["sheet", "sheet1", "instructions", "readme"]]
@@ -465,6 +469,10 @@ def parse_and_preview_syllabus(
     return {
         "success": True,
         "filename": filename,
+        "analysis_source": analysis_source or (
+            "heuristic" if ext in {"pdf", "txt", "doc", "docx", "png", "jpg", "jpeg", "webp"}
+            else "structured_file"
+        ),
         "detected_headers": detected_headers,
         "canonical_columns": CANONICAL_COLUMNS,
         "subjects": sorted(list(subjects_set)),
@@ -556,13 +564,97 @@ def _parse_text_to_preview_rows(text: str, active_exam: str, fallback_subject: O
                     "importance": "medium"
                 })
 
-    if not rows:
-        rows = [
-            {"exam_name": active_exam, "subject_name": current_subject, "unit_name": "Unit 1", "chapter_name": "Overview", "topic_name": "Core Principles & Fundamentals", "subtopic_name": "", "difficulty": "medium", "estimated_minutes": 45, "importance": "high"},
-            {"exam_name": active_exam, "subject_name": current_subject, "unit_name": "Unit 1", "chapter_name": "Overview", "topic_name": "Analytical Methods & Formulas", "subtopic_name": "", "difficulty": "hard", "estimated_minutes": 60, "importance": "high"},
-            {"exam_name": active_exam, "subject_name": current_subject, "unit_name": "Unit 2", "chapter_name": "Practice", "topic_name": "Standard Problem Solving Drills", "subtopic_name": "", "difficulty": "medium", "estimated_minutes": 45, "importance": "medium"}
-        ]
     return rows
+
+
+async def analyze_unstructured_rows(
+    text: str,
+    exam_name: str,
+    fallback_subject: Optional[str] = None,
+    api_key: Optional[str] = None
+) -> tuple[List[Dict[str, Any]], str]:
+    """Extract a syllabus hierarchy with a configured LLM, or use local text heuristics."""
+    prompt = f"""
+Extract only syllabus content from the text below. Do not invent topics.
+Return a JSON object with a "rows" array. Each row must contain:
+"subject_name", "unit_name", "chapter_name", "topic_name", "subtopic_name",
+"difficulty" (easy, medium, or hard), "estimated_minutes" (integer), and
+"importance" (low, medium, high, or very_high).
+Use "{exam_name}" as context. Use "{fallback_subject or 'General'}" when a subject
+cannot be identified. Keep every topic faithful to the source and put parent
+headings into unit_name and chapter_name rather than treating them as topics.
+
+Syllabus text:
+{text[:40000]}
+"""
+    raw_response = await ai_service.call_llm(
+        prompt,
+        api_key=api_key,
+        system_instruction="You extract syllabus structure faithfully. Return valid JSON only.",
+        json_mode=True
+    )
+
+    extracted_rows: List[Dict[str, Any]] = []
+    analysis_source = "heuristic"
+    if raw_response:
+        try:
+            parsed = json.loads(raw_response)
+            candidate_rows = parsed.get("rows", []) if isinstance(parsed, dict) else []
+            if isinstance(candidate_rows, list):
+                for row in candidate_rows:
+                    if not isinstance(row, dict):
+                        continue
+                    topic_name = clean_name(row.get("topic_name"))
+                    if len(topic_name) < 2:
+                        continue
+                    extracted_rows.append({
+                        "exam_name": exam_name,
+                        "subject_name": clean_name(row.get("subject_name")) or fallback_subject or "General",
+                        "unit_name": clean_name(row.get("unit_name")) or "General Unit",
+                        "chapter_name": clean_name(row.get("chapter_name")) or "Core Chapter",
+                        "topic_name": topic_name,
+                        "subtopic_name": clean_name(row.get("subtopic_name")),
+                        "difficulty": normalize_difficulty(row.get("difficulty")),
+                        "estimated_minutes": normalize_minutes(row.get("estimated_minutes")),
+                        "importance": normalize_importance(row.get("importance"))
+                    })
+            if extracted_rows:
+                analysis_source = "live_ai"
+        except (json.JSONDecodeError, TypeError, ValueError):
+            extracted_rows = []
+
+    if not extracted_rows:
+        extracted_rows = _parse_text_to_preview_rows(text, exam_name, fallback_subject)
+    return extracted_rows, analysis_source
+
+
+async def analyze_unstructured_text(
+    text: str,
+    api_key: Optional[str] = None,
+    exam_name: str = "Target Examination",
+    fallback_subject: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """Return parsed free-text syllabus topics grouped for the study-plan generator."""
+    rows, _ = await analyze_unstructured_rows(
+        text=text,
+        exam_name=exam_name,
+        fallback_subject=fallback_subject,
+        api_key=api_key
+    )
+    grouped: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        subject_name = row["subject_name"]
+        subject = grouped.setdefault(
+            subject_name,
+            {"id": f"subject_{len(grouped) + 1}", "name": subject_name, "topics": []}
+        )
+        subject["topics"].append({
+            "name": row["topic_name"],
+            "difficulty": row["difficulty"],
+            "estimated_minutes": row["estimated_minutes"],
+            "importance": row["importance"]
+        })
+    return list(grouped.values())
 
 def build_complete_study_plan(
     subjects: List[Dict[str, Any]],

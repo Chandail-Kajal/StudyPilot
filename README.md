@@ -107,6 +107,7 @@ Sample test files are located in the `sample_syllabi/` folder:
    DATABASE_URL=sqlite:///studypilot.db
    GEMINI_API_KEY=your_gemini_api_key_here
    ```
+   Gemini and OpenAI integrations are called by the backend only when an API key is configured (in this environment file or the signed-in user's **Profile & Settings**). Free-text syllabus uploads use the configured provider for topic extraction; Excel and CSV uploads use their structured columns, and uploads without a key use local parsing. Confirming an import stores the topic hierarchy and schedules lesson and practice sessions. Interactive lesson content is generated and cached when a student opens a topic in the Study Planner.
 
 ---
 

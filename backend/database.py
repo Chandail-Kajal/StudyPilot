@@ -447,6 +447,13 @@ def init_db():
         priority TEXT DEFAULT 'medium',
         status TEXT NOT NULL DEFAULT 'pending',
         completed_at TEXT,
+        activity_type TEXT DEFAULT 'learn',
+        missed INTEGER DEFAULT 0,
+        original_date TEXT DEFAULT NULL,
+        notes TEXT DEFAULT NULL,
+        start_time TEXT DEFAULT NULL,
+        end_time TEXT DEFAULT NULL,
+        title TEXT DEFAULT NULL,
         FOREIGN KEY (study_plan_id) REFERENCES study_plans (id) ON DELETE CASCADE,
         FOREIGN KEY (topic_id) REFERENCES topics (id) ON DELETE CASCADE
     );
@@ -642,6 +649,12 @@ def init_db():
         cursor.execute("ALTER TABLE study_plan_tasks ADD COLUMN original_date TEXT DEFAULT NULL;")
     if "notes" not in spt_cols:
         cursor.execute("ALTER TABLE study_plan_tasks ADD COLUMN notes TEXT DEFAULT NULL;")
+    if "start_time" not in spt_cols:
+        cursor.execute("ALTER TABLE study_plan_tasks ADD COLUMN start_time TEXT DEFAULT NULL;")
+    if "end_time" not in spt_cols:
+        cursor.execute("ALTER TABLE study_plan_tasks ADD COLUMN end_time TEXT DEFAULT NULL;")
+    if "title" not in spt_cols:
+        cursor.execute("ALTER TABLE study_plan_tasks ADD COLUMN title TEXT DEFAULT NULL;")
 
     # 19. topic_learning_content (Interactive AI Learning Studio)
     cursor.execute("""

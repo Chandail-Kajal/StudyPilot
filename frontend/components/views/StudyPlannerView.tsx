@@ -18,6 +18,7 @@ interface PlanTask {
   id: string;
   topic_id: string;
   topic_name: string;
+  title?: string;
   subject_name: string;
   scheduled_date: string;
   estimated_minutes: number;
@@ -361,6 +362,11 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
                               <span className="badge badge-outline text-xs text-info border-info/30">
                                 {task.subject_name}
                               </span>
+                              {task.activity_type && (
+                                <span className="badge badge-outline text-xs">
+                                  {task.activity_type === 'class' ? 'Lesson' : task.activity_type === 'practice' ? 'Practice' : task.activity_type}
+                                </span>
+                              )}
                             </div>
 
                             <div className="flex items-center gap-3 text-xs text-muted mt-1">
@@ -385,7 +391,7 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
                               title="Learn this concept in Interactive AI Studio"
                             >
                               <Icon name="sparkles" className="w-3.5 h-3.5" />
-                              Studio
+                              {task.activity_type === 'class' ? 'Open lesson' : 'Studio'}
                             </button>
                           )}
                           {onStartFocusSession && !isDone && (

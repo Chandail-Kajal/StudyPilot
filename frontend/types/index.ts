@@ -145,6 +145,7 @@ export interface SyllabusPreviewSummary {
 export interface SyllabusPreviewResponse {
   success: boolean;
   filename: string;
+  analysis_source?: 'live_ai' | 'heuristic' | 'structured_file' | string;
   detected_headers: string[];
   canonical_columns: string[];
   subjects: string[];
@@ -751,4 +752,3 @@ export interface PredictedPaper {
   questions: PredictedPaperQuestion[];
   created_at?: string;
 }
-

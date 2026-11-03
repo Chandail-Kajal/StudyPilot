@@ -961,6 +961,16 @@ def export_data(user: dict = Depends(get_current_user)):
 
 # ----------------- Syllabus File Parsing & Plan Generator -----------------
 
+def extract_unstructured_syllabus_text(content: bytes, extension: str) -> str:
+    if extension == "pdf":
+        return syllabus_parser.extract_text_from_pdf(content)
+    if extension in {"doc", "docx"}:
+        return syllabus_parser.extract_text_from_docx(content)
+    if extension in {"png", "jpg", "jpeg", "webp"}:
+        return syllabus_parser.extract_text_from_image(content)
+    return content.decode("utf-8", errors="ignore")
+
+
 @app.post("/api/syllabus/parse-and-plan")
 async def parse_and_plan_syllabus(
     file: UploadFile = File(...),
@@ -988,31 +998,58 @@ async def parse_and_plan_syllabus(
     goal_m = daily_goal_mins or (user.get("goal_mins") if user else 180)
 
     try:
-        if ext == "pdf":
-            raw_text = syllabus_parser.extract_text_from_pdf(content_bytes)
-            subjects = await syllabus_parser.analyze_unstructured_text(raw_text, api_key=api_key)
-        elif ext in ["xlsx", "xls"]:
-            subjects = syllabus_parser.parse_excel_syllabus(content_bytes, filename)
-        elif ext in ["csv", "txt"]:
-            text_str = content_bytes.decode("utf-8", errors="ignore")
-            if ext == "csv":
-                subjects = syllabus_parser.parse_csv_syllabus(text_str)
-            else:
-                subjects = await syllabus_parser.analyze_unstructured_text(text_str, api_key=api_key)
-        else:
-            try:
-                text_str = content_bytes.decode("utf-8")
-                subjects = await syllabus_parser.analyze_unstructured_text(text_str, api_key=api_key)
-            except Exception:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Unsupported file format. Please upload a PDF (.pdf), Excel (.xlsx/.xls), or CSV file."
-                )
+        supported_extensions = {"pdf", "xlsx", "xls", "csv", "txt", "docx", "png", "jpg", "jpeg", "webp"}
+        if ext not in supported_extensions:
+            raise HTTPException(
+                status_code=400,
+                detail="Unsupported file format. Please upload PDF, Excel, CSV, DOCX, TXT, or a supported image."
+            )
 
+        analysis_source = "structured_file"
+        if ext in {"xlsx", "xls", "csv"}:
+            preview = syllabus_parser.parse_and_preview_syllabus(
+                file_bytes=content_bytes,
+                filename=filename,
+                exam_name=exam_nm
+            )
+        else:
+            raw_text = extract_unstructured_syllabus_text(content_bytes, ext)
+            if not raw_text.strip():
+                raise HTTPException(status_code=400, detail="No readable syllabus text was found in the uploaded file.")
+            rows, analysis_source = await syllabus_parser.analyze_unstructured_rows(
+                raw_text,
+                exam_name=exam_nm,
+                api_key=resolve_api_key(api_key, user)
+            )
+            preview = syllabus_parser.parse_and_preview_syllabus(
+                file_bytes=content_bytes,
+                filename=filename,
+                exam_name=exam_nm,
+                preparsed_rows=rows,
+                analysis_source=analysis_source
+            )
+
+        subjects_by_name: Dict[str, Dict[str, Any]] = {}
+        for row in preview["rows"]:
+            subject = subjects_by_name.setdefault(
+                row["subject_name"],
+                {
+                    "id": f"subject_{len(subjects_by_name) + 1}",
+                    "name": row["subject_name"],
+                    "topics": []
+                }
+            )
+            subject["topics"].append({
+                "name": row["topic_name"],
+                "difficulty": row["difficulty"],
+                "estimated_minutes": row["estimated_minutes"],
+                "importance": row["importance"]
+            })
+        subjects = list(subjects_by_name.values())
         if not subjects:
             raise HTTPException(
                 status_code=400,
-                detail="Could not extract subjects from the uploaded file. Please ensure the document contains syllabus topics."
+                detail="Could not extract syllabus topics. Check the file contents and try again."
             )
 
         plan = syllabus_parser.build_complete_study_plan(
@@ -1029,6 +1066,7 @@ async def parse_and_plan_syllabus(
         return {
             "success": True,
             "filename": filename,
+            "analysis_source": analysis_source,
             "plan": plan,
             "summary": summary,
             "subjects_count": len(plan["subjects"]),
@@ -1648,6 +1686,22 @@ async def syllabus_upload_preview(
         except Exception:
             pass
 
+    unstructured_exts = {"pdf", "txt", "docx", "doc", "png", "jpg", "jpeg", "webp"}
+    analysis_source = "structured_file"
+    preparsed_rows = None
+    if ext in unstructured_exts:
+        if ext == "doc":
+            raise HTTPException(status_code=400, detail="Legacy .doc files are not supported. Save the syllabus as .docx and upload it again.")
+        raw_text = extract_unstructured_syllabus_text(content_bytes, ext)
+        if not raw_text.strip():
+            raise HTTPException(status_code=400, detail="No readable syllabus text was found in the uploaded file.")
+        preparsed_rows, analysis_source = await syllabus_parser.analyze_unstructured_rows(
+            raw_text,
+            exam_name=active_exam_name,
+            fallback_subject=subject_name,
+            api_key=resolve_api_key(None, user)
+        )
+
     preview_res = syllabus_parser.parse_and_preview_syllabus(
         file_bytes=content_bytes,
         filename=filename,
@@ -1655,13 +1709,17 @@ async def syllabus_upload_preview(
         default_subject=subject_name,
         scope=scope or "complete",
         custom_mapping=custom_map,
-        existing_topics=existing_topics
+        existing_topics=existing_topics,
+        preparsed_rows=preparsed_rows,
+        analysis_source=analysis_source
     )
+    if not preview_res.get("rows"):
+        raise HTTPException(status_code=400, detail="Could not extract syllabus topics. Check the file contents and try again.")
 
     return preview_res
 
 @app.post("/api/syllabus/paste-preview")
-def syllabus_paste_preview(req: PasteSyllabusRequest, user: dict = Depends(get_current_user)):
+async def syllabus_paste_preview(req: PasteSyllabusRequest, user: dict = Depends(get_current_user)):
     """Parses pasted plain text syllabus lines into a structured, hierarchical preview table."""
     raw_text = req.raw_text.strip()
     if not raw_text:
@@ -1684,14 +1742,24 @@ def syllabus_paste_preview(req: PasteSyllabusRequest, user: dict = Depends(get_c
             existing_topics = [r["topic_name"] for r in cursor.fetchall()]
         conn.close()
 
+    rows, analysis_source = await syllabus_parser.analyze_unstructured_rows(
+        raw_text,
+        exam_name=active_exam_name,
+        fallback_subject=req.subject_name,
+        api_key=resolve_api_key(None, user)
+    )
     preview_res = syllabus_parser.parse_and_preview_syllabus(
         file_bytes=raw_text.encode("utf-8"),
         filename="manual_syllabus.txt",
         exam_name=active_exam_name,
         default_subject=req.subject_name,
         scope=req.scope or "complete",
-        existing_topics=existing_topics
+        existing_topics=existing_topics,
+        preparsed_rows=rows,
+        analysis_source=analysis_source
     )
+    if not preview_res.get("rows"):
+        raise HTTPException(status_code=400, detail="Could not extract syllabus topics. Check the text and try again.")
     return preview_res
 
 @app.post("/api/syllabus/confirm-import")
@@ -1829,18 +1897,36 @@ def syllabus_confirm_import(req: ConfirmImportRequest, user: dict = Depends(get_
 
                 # 5. Topic Progress initialization
                 cursor.execute("""
-                    INSERT IGNORE INTO topic_progress (
+                    INSERT OR IGNORE INTO topic_progress (
                         id, user_id, topic_id, status, completion_percentage, stage,
                         next_revision_date, updated_at
                     ) VALUES (?, ?, ?, 'not_started', 0, 0, ?, ?)
                 """, (f"prog_{user['id']}_{topic_id}", user["id"], topic_id, (datetime.now() + timedelta(days=2)).strftime("%Y-%m-%d"), now_str))
 
-                imported_topics.append({"id": topic_id, "name": topic_name, "subject_id": subject_id})
+                imported_topics.append({
+                    "id": topic_id,
+                    "name": topic_name,
+                    "subject_id": subject_id,
+                    "estimated_minutes": est_mins,
+                    "importance": importance
+                })
 
         # 6. Ensure study plan exists and add scheduled tasks for new topics
-        cursor.execute("SELECT id FROM study_plans WHERE user_id = ? AND exam_id = ?", (user["id"], req.exam_id))
+        cursor.execute(
+            "SELECT id FROM study_plans WHERE user_id = ? AND exam_id = ? ORDER BY created_at DESC LIMIT 1",
+            (user["id"], req.exam_id)
+        )
         sp_row = cursor.fetchone()
         plan_id = sp_row["id"] if sp_row else None
+
+        today = datetime.now().date()
+        try:
+            target_date = datetime.strptime(str(exam["exam_date"])[:10], "%Y-%m-%d").date()
+        except (TypeError, ValueError):
+            target_date = today + timedelta(days=30)
+        if target_date <= today:
+            target_date = today + timedelta(days=7)
+        days_available = max(1, (target_date - today).days)
 
         if not plan_id:
             plan_id = "plan_" + secrets.token_hex(6)
@@ -1850,19 +1936,40 @@ def syllabus_confirm_import(req: ConfirmImportRequest, user: dict = Depends(get_
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)
             """, (
                 plan_id, user["id"], req.exam_id, f"Plan for {exam['exam_name']}",
-                datetime.now().strftime("%Y-%m-%d"), exam["exam_date"],
+                today.strftime("%Y-%m-%d"), target_date.strftime("%Y-%m-%d"),
                 user.get("goal_mins", 180), now_str
             ))
 
-        # Add tasks across the upcoming days
-        for i, t in enumerate(imported_topics):
-            day_offset = (i % 20) + 1
-            t_date = (datetime.now() + timedelta(days=day_offset)).strftime("%Y-%m-%d")
-            cursor.execute("""
+        # Schedule a lesson and a practice session for each newly imported topic.
+        for i, topic in enumerate(imported_topics):
+            day_offset = min(days_available, 1 + (i * days_available // len(imported_topics)))
+            scheduled_date = (today + timedelta(days=day_offset)).strftime("%Y-%m-%d")
+            lesson_minutes = max(25, min(60, int(topic["estimated_minutes"] or 45)))
+            practice_minutes = max(20, min(40, round(lesson_minutes * 2 / 3)))
+            priority = "high" if str(topic["importance"]).lower() in {"high", "very_high"} else "medium"
+            lesson_start = datetime.strptime("09:00", "%H:%M")
+            lesson_end = lesson_start + timedelta(minutes=lesson_minutes)
+            practice_start = lesson_end + timedelta(minutes=15)
+            practice_end = practice_start + timedelta(minutes=practice_minutes)
+            cursor.executemany("""
                 INSERT INTO study_plan_tasks (
-                    id, study_plan_id, topic_id, scheduled_date, estimated_minutes, priority, status
-                ) VALUES (?, ?, ?, ?, 45, 'medium', 'pending')
-            """, (f"spt_{plan_id}_{secrets.token_hex(3)}", plan_id, t["id"], t_date))
+                    id, study_plan_id, topic_id, scheduled_date, estimated_minutes, priority, status,
+                    activity_type, original_date, notes, start_time, end_time, title
+                ) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)
+            """, [
+                (
+                    f"spt_{plan_id}_{secrets.token_hex(3)}", plan_id, topic["id"], scheduled_date,
+                    lesson_minutes, priority, "class", scheduled_date,
+                    f"Interactive lesson for {topic['name']}. Open the topic in AI Learning Studio.",
+                    lesson_start.strftime("%H:%M"), lesson_end.strftime("%H:%M"), f"Lesson: {topic['name']}"
+                ),
+                (
+                    f"spt_{plan_id}_{secrets.token_hex(3)}", plan_id, topic["id"], scheduled_date,
+                    practice_minutes, priority, "practice", scheduled_date,
+                    f"Practice and comprehension check for {topic['name']}.",
+                    practice_start.strftime("%H:%M"), practice_end.strftime("%H:%M"), f"Practice: {topic['name']}"
+                )
+            ])
 
         # Build complete user study plan object for Planner & Calendar views
         cursor.execute("SELECT id, subject_name, color FROM subjects WHERE exam_id = ?", (req.exam_id,))
@@ -1890,6 +1997,7 @@ def syllabus_confirm_import(req: ConfirmImportRequest, user: dict = Depends(get_
         # Load all tasks for this study plan
         cursor.execute("""
             SELECT spt.id, spt.scheduled_date, spt.estimated_minutes, spt.priority, spt.status,
+                   spt.activity_type, spt.title,
                    t.topic_name, t.subject_id
             FROM study_plan_tasks spt
             JOIN topics t ON spt.topic_id = t.id
@@ -1900,7 +2008,8 @@ def syllabus_confirm_import(req: ConfirmImportRequest, user: dict = Depends(get_
         for tr in cursor.fetchall():
             plan_tasks.append({
                 "id": tr["id"],
-                "title": f"Study {tr['topic_name']}",
+                "title": tr["title"] or f"Study {tr['topic_name']}",
+                "activity_type": tr["activity_type"],
                 "subjectId": tr["subject_id"],
                 "date": tr["scheduled_date"],
                 "mins": tr["estimated_minutes"] or 45,
@@ -1933,7 +2042,7 @@ def syllabus_confirm_import(req: ConfirmImportRequest, user: dict = Depends(get_
 
         return {
             "success": True,
-            "message": f"AI analyzed your syllabus! Successfully added {topics_created} topics and generated an adaptive study plan with {len(plan_tasks)} scheduled sessions.",
+            "message": f"Syllabus import complete: {topics_created} new topics and {len(imported_topics) * 2} study sessions scheduled.",
             "plan": user_plan_obj,
             "summary": {
                 "subjects_created": subjects_created,
@@ -2237,7 +2346,10 @@ def update_topic_progress(topic_id: str, req: TopicProgressUpdateRequest, user: 
 def get_study_plan(exam_id: str, user: dict = Depends(get_current_user)):
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM study_plans WHERE user_id = ? AND exam_id = ?", (user["id"], exam_id))
+    cursor.execute(
+        "SELECT * FROM study_plans WHERE user_id = ? AND exam_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1",
+        (user["id"], exam_id)
+    )
     plan = cursor.fetchone()
 
     # If no study_plan exists yet, automatically create one for this exam
@@ -4393,5 +4505,3 @@ def list_predicted_papers(exam_id: str, user: dict = Depends(get_current_user)):
     conn.close()
 
     return {"papers": rows}
-
-

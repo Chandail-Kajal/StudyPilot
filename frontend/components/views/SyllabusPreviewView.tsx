@@ -133,7 +133,7 @@ export const SyllabusPreviewView: React.FC<SyllabusPreviewViewProps> = ({
         rows: rowsToImport
       });
 
-      showToast(res.message || 'Syllabus analyzed by AI! Your personalized study plan is ready.');
+      showToast(res.message || 'Syllabus imported and study sessions scheduled.');
       onImportConfirmed(res.plan);
       onNavigate('planner');
     } catch (e: any) {
@@ -159,8 +159,21 @@ export const SyllabusPreviewView: React.FC<SyllabusPreviewViewProps> = ({
             Syllabus Import Preview
           </h1>
           <p style={{ margin: '4px 0 0', color: 'var(--muted)', fontSize: '14px' }}>
-            Review, edit rows, resolve duplicates, and confirm curriculum. Our AI agent will immediately build your adaptive study plan.
+            Review and edit the topic hierarchy before importing. Importing schedules a lesson and practice session for each new topic.
           </p>
+          <span
+            className="pill neutral"
+            style={{ display: 'inline-flex', marginTop: '8px' }}
+            title={previewData.analysis_source === 'live_ai'
+              ? 'Unstructured syllabus text was analyzed by your configured AI provider.'
+              : 'No live AI provider was used for this preview.'}
+          >
+            {previewData.analysis_source === 'live_ai'
+              ? 'Live AI syllabus analysis'
+              : previewData.analysis_source === 'structured_file'
+                ? 'Structured syllabus parsing'
+                : 'Local text parsing'}
+          </span>
         </div>
 
         <div style={{ display: 'flex', gap: '10px' }}>

@@ -139,7 +139,14 @@ CREATE TABLE IF NOT EXISTS study_plan_tasks (
     estimated_minutes INTEGER DEFAULT 45,
     priority VARCHAR(30) DEFAULT 'medium',
     status VARCHAR(50) NOT NULL DEFAULT 'pending',
-    completed_at TIMESTAMP WITH TIME ZONE
+    completed_at TIMESTAMP WITH TIME ZONE,
+    activity_type VARCHAR(50) DEFAULT 'learn',
+    missed INTEGER DEFAULT 0,
+    original_date DATE,
+    notes TEXT,
+    start_time VARCHAR(10),
+    end_time VARCHAR(10),
+    title TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_plan ON study_plan_tasks(study_plan_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_date ON study_plan_tasks(scheduled_date);
