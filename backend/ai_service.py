@@ -5,6 +5,7 @@ import secrets
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 import httpx
+from ai_provider import ai_manager, extract_clean_json
 
 # Models to try for Gemini
 GEMINI_MODELS = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
@@ -100,18 +101,23 @@ async def call_openai(prompt: str, api_key: str, system_instruction: str = "", j
         return data["choices"][0]["message"]["content"]
 
 async def call_llm(prompt: str, api_key: Optional[str] = None, system_instruction: str = "", json_mode: bool = False) -> Optional[str]:
-    """Universal dispatcher for available AI APIs."""
+    """Universal dispatcher: Gemini (Primary) -> Groq (Secondary) -> Ollama (Local) -> Heuristics."""
     key = get_api_key(api_key)
-    if not key:
-        return None
-    try:
-        if is_openai_key(key):
+    if key and is_openai_key(key):
+        try:
             return await call_openai(prompt, key, system_instruction, json_mode)
-        else:
-            return await call_gemini(prompt, key, system_instruction, json_mode)
-    except Exception as e:
-        print(f"[AI Service Warning] LLM call failed: {e}. Falling back to intelligent heuristic engine.")
-        return None
+        except Exception as e:
+            print(f"[AI Service Warning] OpenAI call failed: {e}. Falling back to AI Service Manager.")
+
+    res = await ai_manager.call_llm(
+        prompt=prompt,
+        system_instruction=system_instruction,
+        json_mode=json_mode,
+        user_key=key
+    )
+    if res.get("success") and res.get("text"):
+        return res["text"]
+    return None
 
 # -------------------------------------------------------------
 # High-Fidelity Heuristic AI Engine (Knowledge Base for Fallback)
@@ -1277,13 +1283,18 @@ async def generate_mock_test(
 
     num_questions = max(3, min(100, num_questions))
     
+    def _extract_topic_name(t):
+        if isinstance(t, dict):
+            return t.get("name") or t.get("title") or "Core Topic"
+        return str(t)
+
     # If importance_filter is specified, filter topics
     if importance_filter == "very_important":
-        filtered_topics = [t for t in topics if get_topic_importance(t.get("name", ""))["importance"] == "very_important"]
+        filtered_topics = [t for t in topics if get_topic_importance(_extract_topic_name(t))["importance"] == "very_important"]
         if filtered_topics:
             topics = filtered_topics
 
-    topic_names = [t.get("name", "Core Topic") for t in topics]
+    topic_names = [_extract_topic_name(t) for t in topics]
     topics_str = ", ".join(topic_names) if topic_names else "General Syllabus"
 
     time_limit_mins = max(5, min(180, int(num_questions * 1.5)))
@@ -1908,6 +1919,16 @@ async def generate_interactive_topic_content(
             if "sections" in parsed and "interactive_elements" in parsed:
                 parsed["source"] = "ai_generated"
                 parsed["education_level"] = education_level
+                # Guarantee all 13 sections exist
+                fallback_pkg = generate_heuristic_topic_learning_studio(topic_name, subject_name, exam_name, education_level)
+                for key_13 in [
+                    "topic_introduction", "learning_objectives", "simple_explanation",
+                    "detailed_explanation", "important_definitions", "step_by_step_examples",
+                    "real_world_applications", "important_formulas", "diagrams_and_visuals",
+                    "points_to_remember", "topic_summary", "practice_questions", "faqs"
+                ]:
+                    if key_13 not in parsed or not parsed[key_13]:
+                        parsed[key_13] = fallback_pkg[key_13]
                 return parsed
         except Exception as e:
             print(f"[AI Learning Studio Warning] JSON parsing error: {e}. Falling back to heuristic generator.")
@@ -2097,10 +2118,113 @@ def generate_heuristic_topic_learning_studio(
         }
     ]
 
+    # The 13 Specific Structured Educational Sections (Requirement 5)
+    sec_13_intro = f"{clean_t} is a core academic topic in {clean_s} that forms an essential portion of {exam_name}. Mastering its fundamentals ensures high accuracy across conceptual questions and numerical applications."
+    sec_13_objs = [
+        f"Master the core definitions, fundamental laws, and mechanisms of {clean_t}.",
+        f"Analyze input-output transformations and boundary equilibrium states in {clean_s}.",
+        f"Solve step-by-step examination problems using standard formulas and dimensional checks.",
+        "Recognize common pitfalls, distractor patterns, and edge cases in examination questions."
+    ]
+    sec_13_simple = f"In simple terms, {clean_t} functions like a well-balanced system: when you modify an input factor, the governing rules of {clean_s} dynamically produce a balanced result. " + analogy1
+    sec_13_detailed = f"From a rigorous academic standpoint, {clean_t} establishes the foundational relationships governing active variables in {clean_s}. It determines state transformations under operational load, boundary constraints, and conservation laws. Analyzing any problem requires decomposing the system into invariant quantities (which remain preserved) and dynamic variables (which change systematically)."
+    sec_13_defs = [
+        {"term": f"{clean_t}", "definition": f"The governing concept in {clean_s} that defines the state, transformation, and fundamental behavior of its active elements."},
+        {"term": "Boundary Condition", "definition": "The limiting physical, mathematical, or logical constraints within which the governing laws operate."},
+        {"term": "Invariant Constraint", "definition": "A fundamental quantity or parity (such as energy, charge, or continuity) that remains conserved throughout the transformation."}
+    ]
+    sec_13_examples = [
+        {
+            "title": f"Standard {clean_t} Problem",
+            "problem": f"A system in {clean_s} is subject to operational stimulus governed by {clean_t}. Determine the resulting equilibrium state.",
+            "steps": [
+                "Step 1: Extract and list all given parameters, initial conditions, and units.",
+                f"Step 2: Identify and write down the governing formula for {clean_t}.",
+                "Step 3: Substitute the known values and simplify the expressions algebraically.",
+                "Step 4: Check dimensional consistency and test boundary limits to confirm the answer."
+            ],
+            "solution": f"The equilibrium state is uniquely determined and verified against the boundary constraints of {clean_t}."
+        }
+    ]
+    sec_13_apps = [
+        ex1,
+        f"Practical engineering and systems design: optimizing resource throughput in {clean_s}.",
+        f"Modern research & diagnostics: modeling state changes and prediction curves in {clean_t}."
+    ]
+    sec_13_formulas = [
+        {
+            "name": f"Core Equation of {clean_t}",
+            "formula": f"Rate({clean_t}) = k \\cdot \\frac{{\\Delta S}}{{\\Delta t}}",
+            "description": "Relates the rate of system transformation to the active driving gradient.",
+            "variables": ["k: Proportionality constant", "ΔS: Net change in driving state", "Δt: Time / Iteration interval"]
+        }
+    ]
+    sec_13_diagrams = {
+        "title": f"{clean_t} Operational Architecture",
+        "description": f"Visual breakdown showing Input Stimulus transforming into Stable Output under the rules of {clean_t}.",
+        "ascii_art": f"[Input State] ---> | Rule of {clean_t} | ---> [Equilibrium Output]\n         ^                      |\n         |--- Feedback Loop ----|",
+        "diagram_svg": f"<svg viewBox='0 0 620 140' width='100%' height='140'><rect x='20' y='42' width='125' height='52' rx='10' fill='#141E2A' stroke='#0A6C9E' stroke-width='1.5'/><text x='82' y='73' fill='#E8EEF4' font-size='12' font-family='system-ui, sans-serif' text-anchor='middle'>Input Stimulus</text><line x1='145' y1='68' x2='195' y2='68' stroke='#54C2F0' stroke-width='2.5' stroke-dasharray='4'/><polygon points='195,68 188,64 188,72' fill='#54C2F0'/><rect x='195' y='28' width='230' height='80' rx='14' fill='#0A6C9E' stroke='#54C2F0' stroke-width='1.5'/><foreignObject x='195' y='28' width='230' height='80'><div xmlns='http://www.w3.org/1999/xhtml' style='display:flex;align-items:center;justify-content:center;height:100%;text-align:center;color:#ffffff;font-size:13px;font-weight:700;line-height:1.25;padding:6px 14px;font-family:system-ui,sans-serif;word-break:break-word;overflow:hidden;'>{clean_t}</div></foreignObject><line x1='425' y1='68' x2='475' y2='68' stroke='#4CC98A' stroke-width='2.5'/><polygon points='475,68 468,64 468,72' fill='#4CC98A'/><rect x='475' y='42' width='125' height='52' rx='10' fill='#1B8553' stroke='#4CC98A' stroke-width='1.5'/><text x='537' y='73' fill='#ffffff' font-size='12' font-family='system-ui, sans-serif' text-anchor='middle'>Stable Output</text></svg>"
+    }
+    sec_13_points = [
+        f"Always check dimensional units before substituting values into {clean_t} formulas.",
+        "Verify whether standard linearity holds or if non-linear threshold rules apply.",
+        f"Distinguish between internal state properties and external system influences in {clean_s}.",
+        "Re-check boundary conditions if an answer yields an extreme or unexpected magnitude."
+    ]
+    sec_13_practice = [
+        {
+            "question": f"Which statement best summarizes the primary operational mechanism of {clean_t}?",
+            "options": [
+                f"It functions randomly with no predictable constraints",
+                f"It governs a deterministic state transition preserving invariant system properties",
+                f"It only holds when temperature and pressure are zero",
+                f"It is an obsolete concept with no competitive examination relevance"
+            ],
+            "correct_idx": 1,
+            "solution": f"In {clean_s}, {clean_t} enforces deterministic relationships that preserve conservation laws.",
+            "hint": "Consider the role of invariants and conservation in systems."
+        },
+        {
+            "question": f"When solving an examination question on {clean_t}, which step should always precede numerical calculation?",
+            "options": [
+                "Selecting the option with the largest value",
+                "Checking the system boundary, given parameters, and dimensional consistency",
+                "Ignoring SI unit prefixes",
+                "Applying integration without checking limits"
+            ],
+            "correct_idx": 1,
+            "solution": "Checking system boundaries and units guarantees that equations are not misapplied to out-of-scope regimes.",
+            "hint": "Think about sanity-checking problem assumptions."
+        }
+    ]
+    sec_13_faqs = [
+        {
+            "question": f"Why is {clean_t} tested so frequently in {exam_name}?",
+            "answer": f"Because it tests both conceptual comprehension and mathematical problem-solving ability, making it an ideal differentiator for entrance ranks."
+        },
+        {
+            "question": f"What is the best technique to quickly master {clean_t}?",
+            "answer": f"Start with the simple analogy, master the 3 core definitions, practice the worked example step-by-step, and test yourself on the mini-quiz and flashcards."
+        }
+    ]
+
     return {
         "source": "heuristic_studio",
         "education_level": education_level,
         "summary": summary,
+        "topic_introduction": sec_13_intro,
+        "learning_objectives": sec_13_objs,
+        "simple_explanation": sec_13_simple,
+        "detailed_explanation": sec_13_detailed,
+        "important_definitions": sec_13_defs,
+        "step_by_step_examples": sec_13_examples,
+        "real_world_applications": sec_13_apps,
+        "important_formulas": sec_13_formulas,
+        "diagrams_and_visuals": sec_13_diagrams,
+        "points_to_remember": sec_13_points,
+        "topic_summary": summary,
+        "practice_questions": sec_13_practice,
+        "faqs": sec_13_faqs,
         "prerequisites": [
             f"Basic terminology in {clean_s}",
             "Fundamental arithmetic & logical reasoning",

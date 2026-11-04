@@ -49,6 +49,7 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
   const [planData, setPlanData] = useState<PlanData | null>(null);
   const [selectedDateFilter, setSelectedDateFilter] = useState<'today' | 'upcoming' | 'all' | 'completed'>('all');
   const [subjectFilter, setSubjectFilter] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState<string>('');
   const [togglingTaskId, setTogglingTaskId] = useState<string | null>(null);
 
   // Adaptive Plan Generator state
@@ -101,7 +102,7 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
           tasks: prev.tasks.map(t => t.id === taskId ? { ...t, status: res.status } : t)
         };
       });
-      showToast(res.status === 'completed' ? 'Task marked as completed!' : 'Task reopened');
+      showToast(res.status === 'completed' ? '🎉 Task marked completed! Keep the momentum going.' : 'Task reopened.');
     } catch (e: any) {
       showToast(e.message || 'Failed to update task');
     } finally {
@@ -136,6 +137,12 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
 
   const filteredTasks = tasks.filter(task => {
     if (subjectFilter !== 'all' && task.subject_name !== subjectFilter) return false;
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      const matchTopic = task.topic_name.toLowerCase().includes(q);
+      const matchSubj = task.subject_name.toLowerCase().includes(q);
+      if (!matchTopic && !matchSubj) return false;
+    }
     if (selectedDateFilter === 'today') return task.scheduled_date === todayStr;
     if (selectedDateFilter === 'upcoming') return task.scheduled_date >= todayStr && task.status !== 'completed';
     if (selectedDateFilter === 'completed') return task.status === 'completed';
@@ -146,8 +153,15 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
   const completedTasks = tasks.filter(t => t.status === 'completed').length;
   const progressPct = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
   const todayTasks = tasks.filter(t => t.scheduled_date === todayStr);
+  const todayCompleted = todayTasks.filter(t => t.status === 'completed').length;
   const todayMins = todayTasks.reduce((acc, t) => acc + (t.estimated_minutes || 0), 0);
   const remainingMins = tasks.filter(t => t.status !== 'completed').reduce((acc, t) => acc + (t.estimated_minutes || 0), 0);
+
+  // Days until exam
+  const examDateObj = activeExam?.exam_date ? new Date(activeExam.exam_date + 'T00:00:00') : null;
+  const todayObj = new Date();
+  todayObj.setHours(0, 0, 0, 0);
+  const daysUntilExam = examDateObj ? Math.ceil((examDateObj.getTime() - todayObj.getTime()) / (1000 * 60 * 60 * 24)) : null;
 
   // Group tasks by scheduled_date
   const groupedTasks: Record<string, PlanTask[]> = {};
@@ -158,256 +172,665 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
   });
   const sortedDates = Object.keys(groupedTasks).sort();
 
+  // Helper for dynamic subject pill colors
+  const getSubjectColor = (name: string) => {
+    const hash = (name || '').split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
+    const palettes = [
+      { bg: 'rgba(56, 189, 248, 0.12)', text: '#38BDF8', border: 'rgba(56, 189, 248, 0.35)' }, // Sky
+      { bg: 'rgba(168, 85, 247, 0.12)', text: '#C084FC', border: 'rgba(168, 85, 247, 0.35)' }, // Violet
+      { bg: 'rgba(52, 211, 153, 0.12)', text: '#34D399', border: 'rgba(52, 211, 153, 0.35)' }, // Mint
+      { bg: 'rgba(251, 146, 60, 0.12)', text: '#FB923C', border: 'rgba(251, 146, 60, 0.35)' }, // Orange
+      { bg: 'rgba(244, 63, 94, 0.12)', text: '#FB7185', border: 'rgba(244, 63, 94, 0.35)' },   // Rose
+      { bg: 'rgba(250, 204, 21, 0.12)', text: '#FACC15', border: 'rgba(250, 204, 21, 0.35)' }  // Amber
+    ];
+    return palettes[hash % palettes.length];
+  };
+
+  // Helper for activity type badge
+  const getActivityBadge = (type?: string) => {
+    switch (type?.toLowerCase()) {
+      case 'class':
+      case 'lesson':
+        return { label: '🎓 AI Lesson', bg: 'rgba(56, 189, 248, 0.15)', color: '#38BDF8', border: 'rgba(56, 189, 248, 0.3)' };
+      case 'practice':
+      case 'drill':
+        return { label: '✍️ Practice Drill', bg: 'rgba(76, 201, 138, 0.15)', color: '#4CC98A', border: 'rgba(76, 201, 138, 0.3)' };
+      case 'test':
+      case 'mock':
+        return { label: '🧪 Mock Test', bg: 'rgba(192, 132, 252, 0.15)', color: '#C084FC', border: 'rgba(192, 132, 252, 0.3)' };
+      case 'revision':
+        return { label: '🔄 Smart Revision', bg: 'rgba(251, 191, 36, 0.15)', color: '#FBBF24', border: 'rgba(251, 191, 36, 0.3)' };
+      default:
+        return { label: '📖 Topic Study', bg: 'rgba(148, 163, 184, 0.12)', color: '#94A3B8', border: 'rgba(148, 163, 184, 0.25)' };
+    }
+  };
+
   if (!activeExam) {
     return (
-      <div className="card text-center p-12">
-        <Icon name="calendar" className="w-12 h-12 text-muted mx-auto mb-3" />
-        <h3 className="text-xl font-bold mb-2">No Active Exam Selected</h3>
-        <p className="text-muted mb-4">Please select or activate an exam to view and manage its study planner.</p>
-        <button onClick={() => onNavigate('exams')} className="btn btn-primary">
-          View My Exams
+      <div className="card text-center p-12" style={{ maxWidth: '600px', margin: '40px auto' }}>
+        <div style={{ width: '64px', height: '64px', borderRadius: '50%', background: 'rgba(99, 102, 241, 0.15)', color: '#6366F1', display: 'grid', placeItems: 'center', margin: '0 auto 16px' }}>
+          <Icon name="calendar" size={32} />
+        </div>
+        <h3 className="text-xl font-bold mb-2">No Active Examination Selected</h3>
+        <p className="text-muted mb-6">Select or activate a target examination to generate and track its personalized study planner.</p>
+        <button onClick={() => onNavigate('exams')} className="btn primary" style={{ margin: '0 auto' }}>
+          <Icon name="award" size={16} /> View My Examinations
         </button>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="badge badge-primary">{activeExam.exam_category}</span>
-            <span className="text-xs text-muted">Daily Goal: {planData?.daily_study_minutes || 120} mins</span>
+    <div style={{ maxWidth: '1240px', margin: '0 auto', padding: '8px 4px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+      
+      {/* 1. Hero Header Banner with Gradient Glassmorphism */}
+      <div
+        style={{
+          background: 'linear-gradient(135deg, rgba(20, 30, 48, 0.95) 0%, rgba(36, 59, 85, 0.95) 100%)',
+          borderRadius: '20px',
+          padding: '28px 32px',
+          border: '1px solid rgba(84, 194, 240, 0.25)',
+          boxShadow: '0 12px 36px rgba(0, 0, 0, 0.35)',
+          position: 'relative',
+          overflow: 'hidden'
+        }}
+      >
+        {/* Ambient Glow */}
+        <div
+          style={{
+            position: 'absolute',
+            top: '-50px',
+            right: '-50px',
+            width: '240px',
+            height: '240px',
+            borderRadius: '50%',
+            background: 'radial-gradient(circle, rgba(56, 189, 248, 0.18) 0%, transparent 70%)',
+            pointerEvents: 'none'
+          }}
+        />
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '20px', position: 'relative' }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px', flexWrap: 'wrap' }}>
+              <span
+                style={{
+                  background: 'rgba(56, 189, 248, 0.18)',
+                  color: '#38BDF8',
+                  border: '1px solid rgba(56, 189, 248, 0.4)',
+                  padding: '3px 10px',
+                  borderRadius: '999px',
+                  fontSize: '11px',
+                  fontWeight: 800,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.06em'
+                }}
+              >
+                {activeExam.exam_category || 'Target Exam'}
+              </span>
+
+              {daysUntilExam !== null && (
+                <span
+                  style={{
+                    background: daysUntilExam <= 14 ? 'rgba(244, 63, 94, 0.18)' : 'rgba(251, 191, 36, 0.18)',
+                    color: daysUntilExam <= 14 ? '#FB7185' : '#FBBF24',
+                    border: `1px solid ${daysUntilExam <= 14 ? 'rgba(244, 63, 94, 0.4)' : 'rgba(251, 191, 36, 0.4)'}`,
+                    padding: '3px 10px',
+                    borderRadius: '999px',
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}
+                >
+                  <Icon name="clock" size={12} />
+                  {daysUntilExam > 0 ? `${daysUntilExam} Days Remaining` : daysUntilExam === 0 ? 'Exam Day Today!' : 'Exam Concluded'}
+                </span>
+              )}
+
+              <span style={{ fontSize: '12px', color: '#92A3B5' }}>
+                Daily Target: <strong style={{ color: '#E8EEF4' }}>{planData?.daily_study_minutes || 120} mins</strong>
+              </span>
+            </div>
+
+            <h1 style={{ fontSize: '28px', fontWeight: 800, color: '#FFFFFF', margin: '0 0 6px 0', letterSpacing: '-0.02em', display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span style={{ color: '#38BDF8' }}>✦</span>
+              Personalized Study Planner: {activeExam.exam_name}
+            </h1>
+            <p style={{ fontSize: '14px', color: '#94A3B8', maxWidth: '640px', margin: 0, lineHeight: 1.5 }}>
+              AI-calibrated date-wise roadmap balancing concept mastery, practice exercises, and mock revision days before your exam.
+            </p>
           </div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Icon name="calendar" className="text-primary w-6 h-6" />
-            Study Planner: {activeExam.exam_name}
-          </h1>
-          <p className="text-sm text-muted">
-            Track daily scheduled topics, study sitting capacity, and milestone progression.
-          </p>
-        </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
-          <button onClick={() => setShowAdaptiveModal(true)} className="btn btn-primary flex items-center gap-1.5 text-xs">
-            <Icon name="sparkles" className="w-3.5 h-3.5" />
-            Generate Adaptive Plan
-          </button>
-          <button onClick={() => onNavigate('smart_recovery')} className="btn btn-outline flex items-center gap-1.5 text-xs">
-            <Icon name="refresh" className="w-3.5 h-3.5" />
-            Smart Recovery Planner
-          </button>
-          <button onClick={fetchPlan} className="btn btn-outline flex items-center gap-1.5 text-xs" disabled={loading}>
-            <Icon name="refresh" className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            <button
+              onClick={() => setShowAdaptiveModal(true)}
+              className="btn primary"
+              style={{
+                background: 'linear-gradient(135deg, #0284C7 0%, #38BDF8 100%)',
+                color: '#FFFFFF',
+                border: 'none',
+                fontWeight: 700,
+                fontSize: '13px',
+                padding: '10px 18px',
+                borderRadius: '10px',
+                boxShadow: '0 4px 14px rgba(2, 132, 199, 0.35)'
+              }}
+            >
+              <Icon name="sparkles" size={15} />
+              Generate Adaptive Plan
+            </button>
+
+            <button
+              onClick={() => onNavigate('smart_recovery')}
+              className="btn"
+              style={{
+                background: 'rgba(255, 255, 255, 0.08)',
+                color: '#E2E8F0',
+                border: '1px solid rgba(255, 255, 255, 0.15)',
+                fontSize: '13px',
+                padding: '10px 16px',
+                borderRadius: '10px'
+              }}
+            >
+              <Icon name="refresh" size={14} />
+              Recovery Planner
+            </button>
+
+            <button
+              onClick={fetchPlan}
+              disabled={loading}
+              className="btn"
+              style={{
+                background: 'rgba(255, 255, 255, 0.08)',
+                color: '#E2E8F0',
+                border: '1px solid rgba(255, 255, 255, 0.15)',
+                fontSize: '13px',
+                padding: '10px',
+                borderRadius: '10px'
+              }}
+              title="Refresh Plan Data"
+            >
+              <Icon name="refresh" size={15} className={loading ? 'animate-spin' : ''} />
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* KPI Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="card p-4">
-          <div className="text-xs font-medium text-muted uppercase tracking-wider mb-1">Completion Rate</div>
-          <div className="text-2xl font-bold text-primary">{progressPct}%</div>
-          <div className="w-full bg-slate-800 rounded-full h-2 mt-2 overflow-hidden">
-            <div className="bg-primary h-full transition-all duration-500" style={{ width: `${progressPct}%` }}></div>
+      {/* 2. Sleek KPI Metrics Cards with Vibrant Gradients */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px' }}>
+        
+        {/* Card 1: Completion Rate */}
+        <div
+          style={{
+            background: 'var(--surface)',
+            borderRadius: '16px',
+            border: '1px solid var(--line)',
+            padding: '20px',
+            boxShadow: 'var(--shadow)',
+            position: 'relative',
+            overflow: 'hidden'
+          }}
+        >
+          <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', fontWeight: 700, marginBottom: '6px' }}>
+            Overall Syllabus Completion
+          </div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+            <span style={{ fontSize: '32px', fontWeight: 800, color: '#38BDF8', letterSpacing: '-0.02em' }}>{progressPct}%</span>
+            <span style={{ fontSize: '13px', color: 'var(--muted)' }}>({completedTasks} of {totalTasks} topics)</span>
+          </div>
+          {/* Dual Gradient Progress Bar */}
+          <div style={{ width: '100%', height: '8px', background: 'var(--surface2)', borderRadius: '999px', marginTop: '14px', overflow: 'hidden' }}>
+            <div
+              style={{
+                width: `${progressPct}%`,
+                height: '100%',
+                background: 'linear-gradient(90deg, #38BDF8 0%, #6366F1 50%, #10B981 100%)',
+                borderRadius: '999px',
+                transition: 'width 0.6s cubic-bezier(0.4, 0, 0.2, 1)'
+              }}
+            />
           </div>
         </div>
 
-        <div className="card p-4">
-          <div className="text-xs font-medium text-muted uppercase tracking-wider mb-1">Tasks Completed</div>
-          <div className="text-2xl font-bold text-success">{completedTasks} <span className="text-sm text-muted font-normal">/ {totalTasks}</span></div>
-          <div className="text-xs text-muted mt-1">{totalTasks - completedTasks} remaining</div>
+        {/* Card 2: Today's Focus Load */}
+        <div
+          style={{
+            background: 'var(--surface)',
+            borderRadius: '16px',
+            border: todayTasks.length > 0 ? '1px solid rgba(56, 189, 248, 0.35)' : '1px solid var(--line)',
+            padding: '20px',
+            boxShadow: 'var(--shadow)'
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+            <span style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#38BDF8', fontWeight: 700 }}>
+              Today's Scheduled Target
+            </span>
+            <span style={{ fontSize: '11px', background: 'rgba(56, 189, 248, 0.15)', color: '#38BDF8', padding: '2px 8px', borderRadius: '4px', fontWeight: 700 }}>
+              {todayCompleted}/{todayTasks.length} Done
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+            <span style={{ fontSize: '32px', fontWeight: 800, color: 'var(--ink)', letterSpacing: '-0.02em' }}>
+              {todayMins} <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--muted)' }}>mins</span>
+            </span>
+          </div>
+          <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Icon name="check" size={14} style={{ color: '#10B981' }} />
+            <span>{todayTasks.length - todayCompleted} tasks remaining for today</span>
+          </div>
         </div>
 
-        <div className="card p-4">
-          <div className="text-xs font-medium text-muted uppercase tracking-wider mb-1">Today's Load</div>
-          <div className="text-2xl font-bold text-warning">{todayTasks.length} <span className="text-sm text-muted font-normal">tasks</span></div>
-          <div className="text-xs text-muted mt-1">{todayMins} mins estimated</div>
+        {/* Card 3: Remaining Effort */}
+        <div
+          style={{
+            background: 'var(--surface)',
+            borderRadius: '16px',
+            border: '1px solid var(--line)',
+            padding: '20px',
+            boxShadow: 'var(--shadow)'
+          }}
+        >
+          <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', fontWeight: 700, marginBottom: '6px' }}>
+            Estimated Total Effort Left
+          </div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+            <span style={{ fontSize: '32px', fontWeight: 800, color: '#C084FC', letterSpacing: '-0.02em' }}>
+              {Math.round(remainingMins / 60 * 10) / 10} <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--muted)' }}>hrs</span>
+            </span>
+          </div>
+          <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '8px' }}>
+            Distributed across {totalTasks - completedTasks} pending syllabus sessions
+          </div>
         </div>
 
-        <div className="card p-4">
-          <div className="text-xs font-medium text-muted uppercase tracking-wider mb-1">Total Effort Left</div>
-          <div className="text-2xl font-bold text-info">{Math.round(remainingMins / 60 * 10) / 10} <span className="text-sm text-muted font-normal">hrs</span></div>
-          <div className="text-xs text-muted mt-1">Across all planned units</div>
+        {/* Card 4: Daily Pace & Countdown */}
+        <div
+          style={{
+            background: 'var(--surface)',
+            borderRadius: '16px',
+            border: '1px solid var(--line)',
+            padding: '20px',
+            boxShadow: 'var(--shadow)'
+          }}
+        >
+          <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', fontWeight: 700, marginBottom: '6px' }}>
+            Target Daily Pace
+          </div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+            <span style={{ fontSize: '32px', fontWeight: 800, color: '#FBBF24', letterSpacing: '-0.02em' }}>
+              {daysUntilExam && daysUntilExam > 0 ? (Math.round((remainingMins / 60 / daysUntilExam) * 10) / 10) : (planData?.daily_study_minutes ? (planData.daily_study_minutes / 60).toFixed(1) : '2.0')}
+              <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--muted)' }}> hrs/day</span>
+            </span>
+          </div>
+          <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '8px' }}>
+            {daysUntilExam && daysUntilExam > 0 ? `Required to finish in ${daysUntilExam} days` : 'Optimal study pace'}
+          </div>
+        </div>
+
+      </div>
+
+      {/* 3. Filter, Search & View Controls Bar */}
+      <div
+        style={{
+          background: 'var(--surface)',
+          borderRadius: '16px',
+          border: '1px solid var(--line)',
+          padding: '16px 20px',
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '16px',
+          boxShadow: 'var(--shadow)'
+        }}
+      >
+        {/* Date Filter Pills */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflowX: 'auto', paddingBottom: '2px' }}>
+          {[
+            { id: 'all', label: `All Tasks (${totalTasks})` },
+            { id: 'today', label: `Today's Focus (${todayTasks.length})` },
+            { id: 'upcoming', label: 'Upcoming' },
+            { id: 'completed', label: `Completed (${completedTasks})` }
+          ].map(f => {
+            const isActive = selectedDateFilter === f.id;
+            return (
+              <button
+                key={f.id}
+                onClick={() => setSelectedDateFilter(f.id as any)}
+                style={{
+                  padding: '7px 16px',
+                  borderRadius: '999px',
+                  fontSize: '12.5px',
+                  fontWeight: 700,
+                  border: '1px solid',
+                  borderColor: isActive ? '#38BDF8' : 'var(--line)',
+                  background: isActive ? 'rgba(56, 189, 248, 0.15)' : 'var(--surface2)',
+                  color: isActive ? '#38BDF8' : 'var(--muted)',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                {f.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Search & Subject Dropdown */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+          <div style={{ position: 'relative', minWidth: '180px' }}>
+            <input
+              type="text"
+              placeholder="Search topics..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '7px 12px 7px 32px',
+                fontSize: '12.5px',
+                borderRadius: '8px',
+                background: 'var(--surface2)',
+                border: '1px solid var(--line)',
+                color: 'var(--ink)',
+                outline: 'none'
+              }}
+            />
+            <div style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--muted)', pointerEvents: 'none' }}>
+              <Icon name="search" size={13} />
+            </div>
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: 'var(--muted)', cursor: 'pointer' }}
+              >
+                <Icon name="x" size={12} />
+              </button>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '12px', color: 'var(--muted)', fontWeight: 600 }}>Subject:</span>
+            <select
+              value={subjectFilter}
+              onChange={(e) => setSubjectFilter(e.target.value)}
+              style={{
+                padding: '7px 12px',
+                fontSize: '12.5px',
+                borderRadius: '8px',
+                background: 'var(--surface2)',
+                border: '1px solid var(--line)',
+                color: 'var(--ink)',
+                cursor: 'pointer'
+              }}
+            >
+              <option value="all">All Subjects ({subjects.length})</option>
+              {subjects.map(s => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
-      {/* Filter and Date Bar */}
-      <div className="card p-4 flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0">
-          <button
-            onClick={() => setSelectedDateFilter('all')}
-            className={`btn btn-sm ${selectedDateFilter === 'all' ? 'btn-primary' : 'btn-outline'}`}
-          >
-            All Scheduled ({totalTasks})
-          </button>
-          <button
-            onClick={() => setSelectedDateFilter('today')}
-            className={`btn btn-sm ${selectedDateFilter === 'today' ? 'btn-primary' : 'btn-outline'}`}
-          >
-            Today ({todayTasks.length})
-          </button>
-          <button
-            onClick={() => setSelectedDateFilter('upcoming')}
-            className={`btn btn-sm ${selectedDateFilter === 'upcoming' ? 'btn-primary' : 'btn-outline'}`}
-          >
-            Upcoming
-          </button>
-          <button
-            onClick={() => setSelectedDateFilter('completed')}
-            className={`btn btn-sm ${selectedDateFilter === 'completed' ? 'btn-primary' : 'btn-outline'}`}
-          >
-            Completed ({completedTasks})
-          </button>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <label className="text-xs text-muted flex items-center gap-1">
-            <Icon name="filter" className="w-3.5 h-3.5" />
-            Subject:
-          </label>
-          <select
-            value={subjectFilter}
-            onChange={(e) => setSubjectFilter(e.target.value)}
-            className="input py-1 px-3 text-sm bg-slate-900 border border-slate-700 rounded-lg text-white"
-          >
-            <option value="all">All Subjects</option>
-            {subjects.map(s => (
-              <option key={s} value={s}>{s}</option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      {/* Task List / Schedule Table */}
+      {/* 4. Task Schedule Listing */}
       {loading ? (
-        <div className="card p-12 text-center text-muted">
-          <Icon name="refresh" className="w-8 h-8 animate-spin mx-auto mb-2 text-primary" />
-          Loading your study planner...
+        <div className="card text-center p-12" style={{ color: 'var(--muted)' }}>
+          <Icon name="refresh" size={32} className="animate-spin mx-auto mb-3" style={{ color: '#38BDF8' }} />
+          <h4 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--ink)' }}>Loading personalized timetable...</h4>
+          <p style={{ fontSize: '13px' }}>Organizing daily curriculum sessions and study sitting intervals.</p>
         </div>
       ) : sortedDates.length === 0 ? (
-        <div className="card p-12 text-center">
-          <Icon name="calendar" className="w-12 h-12 text-muted mx-auto mb-3" />
-          <h3 className="text-lg font-bold mb-1">No tasks match your filter</h3>
-          <p className="text-sm text-muted mb-4">
-            Upload a syllabus or reset your filter to view scheduled study sessions.
+        <div className="card text-center p-12" style={{ background: 'var(--surface)' }}>
+          <div style={{ width: '56px', height: '56px', borderRadius: '50%', background: 'rgba(56, 189, 248, 0.1)', color: '#38BDF8', display: 'grid', placeItems: 'center', margin: '0 auto 16px' }}>
+            <Icon name="calendar" size={28} />
+          </div>
+          <h3 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '6px' }}>No Sessions Match Your Current Filter</h3>
+          <p style={{ fontSize: '13px', color: 'var(--muted)', maxWidth: '420px', margin: '0 auto 16px' }}>
+            {tasks.length === 0
+              ? 'Click "Generate Adaptive Plan" above to create an automated daily study timetable based on your syllabus!'
+              : 'Try selecting "All Tasks" or clearing your search query to view your scheduled timetable.'}
           </p>
-          <button onClick={() => { setSelectedDateFilter('all'); setSubjectFilter('all'); }} className="btn btn-outline">
-            Reset Filters
-          </button>
+          {tasks.length === 0 ? (
+            <button onClick={() => setShowAdaptiveModal(true)} className="btn primary" style={{ margin: '0 auto' }}>
+              <Icon name="sparkles" size={15} /> Generate Adaptive Study Plan
+            </button>
+          ) : (
+            <button onClick={() => { setSelectedDateFilter('all'); setSubjectFilter('all'); setSearchQuery(''); }} className="btn" style={{ margin: '0 auto' }}>
+              Reset Filters
+            </button>
+          )}
         </div>
       ) : (
-        <div className="space-y-6">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           {sortedDates.map(date => {
             const isToday = date === todayStr;
             const dateTasks = groupedTasks[date];
             const dateTotalMins = dateTasks.reduce((acc, t) => acc + (t.estimated_minutes || 0), 0);
             const dateCompleted = dateTasks.filter(t => t.status === 'completed').length;
+            const allDone = dateCompleted === dateTasks.length;
 
             return (
-              <div key={date} className={`card p-5 ${isToday ? 'border-primary/50 bg-primary/5' : ''}`}>
-                {/* Date header */}
-                <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
-                  <div className="flex items-center gap-3">
-                    <span className={`px-2.5 py-1 rounded text-xs font-semibold ${isToday ? 'bg-primary text-white' : 'bg-slate-800 text-slate-300'}`}>
-                      {isToday ? 'TODAY' : date}
+              <div
+                key={date}
+                style={{
+                  background: isToday
+                    ? 'linear-gradient(135deg, rgba(56, 189, 248, 0.05) 0%, rgba(99, 102, 241, 0.04) 100%)'
+                    : 'var(--surface)',
+                  borderRadius: '16px',
+                  border: isToday
+                    ? '1.5px solid rgba(56, 189, 248, 0.45)'
+                    : '1px solid var(--line)',
+                  padding: '20px',
+                  boxShadow: isToday
+                    ? '0 8px 28px rgba(56, 189, 248, 0.12)'
+                    : 'var(--shadow)'
+                }}
+              >
+                {/* Date Header Strip */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--line)', paddingBottom: '12px', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span
+                      style={{
+                        padding: '4px 12px',
+                        borderRadius: '6px',
+                        fontSize: '11px',
+                        fontWeight: 800,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.06em',
+                        background: isToday ? '#38BDF8' : 'var(--surface2)',
+                        color: isToday ? '#0C131B' : 'var(--ink)'
+                      }}
+                    >
+                      {isToday ? '⭐ TODAY' : date}
                     </span>
-                    <span className="text-sm font-medium text-slate-300">
+
+                    <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--ink)' }}>
                       {new Date(date + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
                     </span>
+
+                    {allDone && (
+                      <span style={{ fontSize: '11px', background: 'rgba(76, 201, 138, 0.15)', color: '#4CC98A', padding: '2px 8px', borderRadius: '4px', fontWeight: 700 }}>
+                        ✓ All Done
+                      </span>
+                    )}
                   </div>
-                  <div className="text-xs text-muted flex items-center gap-3">
-                    <span>{dateCompleted}/{dateTasks.length} Done</span>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '12px', color: 'var(--muted)' }}>
+                    <span>
+                      <strong style={{ color: 'var(--ink)' }}>{dateCompleted}/{dateTasks.length}</strong> Completed
+                    </span>
                     <span>•</span>
-                    <span>{dateTotalMins} Mins Planned</span>
+                    <span>
+                      <strong style={{ color: 'var(--ink)' }}>{dateTotalMins}</strong> Mins Planned
+                    </span>
                   </div>
                 </div>
 
-                {/* Task Items */}
-                <div className="space-y-3">
+                {/* Tasks in this Date */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   {dateTasks.map(task => {
                     const isDone = task.status === 'completed';
                     const isToggling = togglingTaskId === task.id;
+                    const subjStyle = getSubjectColor(task.subject_name);
+                    const actBadge = getActivityBadge(task.activity_type);
 
                     return (
                       <div
                         key={task.id}
-                        className={`flex flex-col sm:flex-row items-start sm:items-center justify-between p-3.5 rounded-lg border transition-all ${
-                          isDone
-                            ? 'bg-slate-900/40 border-slate-800/80 opacity-70'
-                            : 'bg-slate-900/80 border-slate-800 hover:border-slate-700'
-                        }`}
+                        style={{
+                          background: isDone ? 'var(--surface2)' : 'var(--surface)',
+                          borderRadius: '12px',
+                          border: isDone ? '1px solid var(--line)' : '1px solid var(--line)',
+                          padding: '14px 18px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          flexWrap: 'wrap',
+                          gap: '14px',
+                          opacity: isDone ? 0.72 : 1,
+                          transition: 'all 0.2s ease'
+                        }}
                       >
-                        <div className="flex items-start gap-3 flex-1 min-w-0 mb-3 sm:mb-0">
+                        {/* Left: Checkbox + Topic Details */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flex: '1 1 320px', minWidth: 0 }}>
+                          {/* Custom Checkbox */}
                           <button
                             onClick={() => handleToggleTask(task.id)}
                             disabled={isToggling}
-                            className={`w-6 h-6 rounded mt-0.5 flex items-center justify-center border transition-colors ${
-                              isDone
-                                ? 'bg-success border-success text-white'
-                                : 'border-slate-600 hover:border-primary'
-                            }`}
-                            title={isDone ? 'Mark as pending' : 'Mark as completed'}
+                            style={{
+                              width: '24px',
+                              height: '24px',
+                              borderRadius: '6px',
+                              border: isDone ? '2px solid #10B981' : '2px solid var(--line)',
+                              background: isDone ? '#10B981' : 'transparent',
+                              color: '#FFFFFF',
+                              display: 'grid',
+                              placeItems: 'center',
+                              cursor: 'pointer',
+                              flexShrink: 0,
+                              transition: 'all 0.15s ease'
+                            }}
+                            title={isDone ? 'Mark task as pending' : 'Mark task completed'}
                           >
-                            {isDone && <Icon name="check" className="w-3.5 h-3.5 stroke-[3]" />}
+                            {isDone && <Icon name="check" size={14} style={{ strokeWidth: 3 }} />}
                           </button>
 
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className={`text-base font-semibold ${isDone ? 'line-through text-muted' : 'text-slate-100'}`}>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '3px' }}>
+                              <span
+                                style={{
+                                  fontSize: '15px',
+                                  fontWeight: 700,
+                                  color: isDone ? 'var(--muted)' : 'var(--ink)',
+                                  textDecoration: isDone ? 'line-through' : 'none'
+                                }}
+                              >
                                 {task.topic_name}
                               </span>
-                              <span className="badge badge-outline text-xs text-info border-info/30">
+
+                              {/* Subject Badge */}
+                              <span
+                                style={{
+                                  fontSize: '11px',
+                                  fontWeight: 700,
+                                  padding: '2px 8px',
+                                  borderRadius: '6px',
+                                  background: subjStyle.bg,
+                                  color: subjStyle.text,
+                                  border: `1px solid ${subjStyle.border}`
+                                }}
+                              >
                                 {task.subject_name}
                               </span>
-                              {task.activity_type && (
-                                <span className="badge badge-outline text-xs">
-                                  {task.activity_type === 'class' ? 'Lesson' : task.activity_type === 'practice' ? 'Practice' : task.activity_type}
-                                </span>
-                              )}
+
+                              {/* Activity Badge */}
+                              <span
+                                style={{
+                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                  padding: '2px 8px',
+                                  borderRadius: '6px',
+                                  background: actBadge.bg,
+                                  color: actBadge.color,
+                                  border: `1px solid ${actBadge.border}`
+                                }}
+                              >
+                                {actBadge.label}
+                              </span>
                             </div>
 
-                            <div className="flex items-center gap-3 text-xs text-muted mt-1">
-                              <span className="flex items-center gap-1">
-                                <Icon name="clock" className="w-3.5 h-3.5" />
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '12px', color: 'var(--muted)' }}>
+                              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <Icon name="clock" size={13} />
                                 {task.estimated_minutes || 45} mins
                               </span>
                               {task.completed_at && (
-                                <span className="text-success">
-                                  Completed at {new Date(task.completed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                <span style={{ color: '#10B981' }}>
+                                  ✓ Completed {new Date(task.completed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                 </span>
                               )}
                             </div>
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-2 self-end sm:self-center">
+                        {/* Right: Quick Action Buttons */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
                           {onOpenTopicStudio && (
                             <button
                               onClick={() => onOpenTopicStudio(task.topic_id)}
-                              className="btn btn-sm btn-outline text-xs flex items-center gap-1 border-primary/40 text-primary hover:bg-primary/20"
-                              title="Learn this concept in Interactive AI Studio"
+                              className="btn sm"
+                              style={{
+                                background: 'rgba(56, 189, 248, 0.1)',
+                                color: '#38BDF8',
+                                border: '1px solid rgba(56, 189, 248, 0.35)',
+                                fontSize: '11.5px',
+                                fontWeight: 700,
+                                padding: '5px 12px',
+                                borderRadius: '8px'
+                              }}
+                              title="Open in Interactive AI Learning Studio"
                             >
-                              <Icon name="sparkles" className="w-3.5 h-3.5" />
-                              {task.activity_type === 'class' ? 'Open lesson' : 'Studio'}
+                              <Icon name="sparkles" size={13} />
+                              Open Studio
                             </button>
                           )}
+
                           {onStartFocusSession && !isDone && (
                             <button
                               onClick={() => onStartFocusSession(task.estimated_minutes || 45, task.subject_name)}
-                              className="btn btn-sm btn-outline text-xs flex items-center gap-1 border-primary/40 hover:bg-primary/20"
-                              title="Start Pomodoro Focus Session on this topic"
+                              className="btn sm"
+                              style={{
+                                background: 'var(--surface2)',
+                                color: 'var(--ink)',
+                                border: '1px solid var(--line)',
+                                fontSize: '11.5px',
+                                fontWeight: 600,
+                                padding: '5px 12px',
+                                borderRadius: '8px'
+                              }}
+                              title="Launch Pomodoro Focus Timer for this session"
                             >
-                              <Icon name="clock" className="w-3.5 h-3.5 text-primary" />
+                              <Icon name="clock" size={13} style={{ color: '#38BDF8' }} />
                               Focus
                             </button>
                           )}
+
                           <button
                             onClick={() => handleToggleTask(task.id)}
                             disabled={isToggling}
-                            className={`btn btn-sm text-xs ${isDone ? 'btn-outline text-muted' : 'btn-success'}`}
+                            className="btn sm"
+                            style={{
+                              background: isDone ? 'transparent' : 'rgba(16, 185, 129, 0.12)',
+                              color: isDone ? 'var(--muted)' : '#10B981',
+                              border: isDone ? '1px solid var(--line)' : '1px solid rgba(16, 185, 129, 0.35)',
+                              fontSize: '11.5px',
+                              fontWeight: 700,
+                              padding: '5px 12px',
+                              borderRadius: '8px'
+                            }}
                           >
                             {isToggling ? '...' : isDone ? 'Reopen' : 'Done'}
                           </button>
@@ -422,24 +845,38 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
         </div>
       )}
 
-      {/* Adaptive Plan Generation Modal */}
+      {/* 5. Adaptive Plan Generation Modal */}
       {showAdaptiveModal && (
         <div className="overlay" onClick={(e) => { if (e.target === e.currentTarget) setShowAdaptiveModal(false); }}>
-          <div className="modal" style={{ maxWidth: '520px' }}>
+          <div className="modal" style={{ maxWidth: '540px', borderRadius: '18px', padding: '28px', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <h2 style={{ margin: 0, fontSize: '20px' }}>Generate Adaptive Study Plan</h2>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'rgba(56, 189, 248, 0.15)', color: '#38BDF8', display: 'grid', placeItems: 'center' }}>
+                  <Icon name="sparkles" size={18} />
+                </div>
+                <div>
+                  <h2 style={{ margin: 0, fontSize: '19px', fontWeight: 800 }}>Generate Adaptive Study Plan</h2>
+                  <div style={{ fontSize: '12px', color: 'var(--muted)' }}>Calibrated for {activeExam.exam_name}</div>
+                </div>
+              </div>
               <button className="linkbtn" onClick={() => setShowAdaptiveModal(false)}><Icon name="x" size={18} /></button>
             </div>
 
-            <form onSubmit={handleGenerateAdaptivePlan} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <p style={{ fontSize: '13px', color: 'var(--muted)', margin: 0 }}>
-                The StudyPilot AI planner coordinates complete syllabus coverage, concept studio learning, practice drills, and mock test buffer days.
+            <form onSubmit={handleGenerateAdaptivePlan} style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+              <p style={{ fontSize: '13px', color: 'var(--muted)', margin: 0, lineHeight: 1.5 }}>
+                StudyPilot AI analyzes your complete syllabus hierarchy, topic difficulty, and exam date to formulate an optimized date-wise daily study timetable.
               </p>
 
-              <div>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>
-                  Daily Study Capacity: {genDailyHours} hrs ({Math.round(genDailyHours * 60)} mins)
-                </label>
+              {/* Daily Capacity Slider */}
+              <div style={{ background: 'var(--surface2)', padding: '16px', borderRadius: '12px', border: '1px solid var(--line)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <label style={{ fontSize: '13px', fontWeight: 700 }}>
+                    Daily Available Study Time:
+                  </label>
+                  <span style={{ fontSize: '14px', fontWeight: 800, color: '#38BDF8' }}>
+                    {genDailyHours} hrs ({Math.round(genDailyHours * 60)} mins)
+                  </span>
+                </div>
                 <input
                   type="range"
                   min="1.0"
@@ -447,46 +884,49 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
                   step="0.5"
                   value={genDailyHours}
                   onChange={(e) => setGenDailyHours(parseFloat(e.target.value))}
-                  style={{ width: '100%' }}
+                  style={{ width: '100%', accentColor: '#38BDF8', height: '6px' }}
                 />
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--muted)', marginTop: '4px' }}>
-                  <span>1 hr</span>
-                  <span>4 hrs</span>
-                  <span>8 hrs</span>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--muted)', marginTop: '6px' }}>
+                  <span>1 hr (Light)</span>
+                  <span>3.5 hrs (Recommended)</span>
+                  <span>8 hrs (Intensive)</span>
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px', fontWeight: 600 }}>
-                  Learning Pace
+              {/* Pace & Buffer Days */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ fontSize: '12.5px', fontWeight: 700 }}>Learning Pace</label>
                   <select
                     value={genLearningPace}
                     onChange={(e) => setGenLearningPace(e.target.value)}
-                    style={{ padding: '8px', borderRadius: '8px', background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)' }}
+                    style={{ padding: '9px 12px', borderRadius: '8px', background: 'var(--surface2)', border: '1px solid var(--line)', color: 'var(--ink)', fontSize: '13px' }}
                   >
                     <option value="moderate">Moderate & Balanced</option>
-                    <option value="accelerated">Accelerated / Fast-Track</option>
+                    <option value="accelerated">Accelerated (Fast-Track)</option>
                     <option value="relaxed">Comprehensive & Relaxed</option>
                   </select>
-                </label>
+                </div>
 
-                <label style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px', fontWeight: 600 }}>
-                  Revision Buffer Days
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ fontSize: '12.5px', fontWeight: 700 }}>Revision Buffer Days</label>
                   <input
                     type="number"
                     min={1}
                     max={14}
                     value={genBufferDays}
                     onChange={(e) => setGenBufferDays(parseInt(e.target.value))}
+                    style={{ padding: '9px 12px', borderRadius: '8px', background: 'var(--surface2)', border: '1px solid var(--line)', color: 'var(--ink)', fontSize: '13px' }}
                   />
-                </label>
+                </div>
               </div>
 
+              {/* Available Days Selector */}
               <div>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>
-                  Available Study Days
+                <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 700, marginBottom: '8px' }}>
+                  Weekly Study Days
                 </label>
-                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                   {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => {
                     const isSelected = genAvailableDays.includes(day);
                     return (
@@ -502,8 +942,17 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
                             setGenAvailableDays([...genAvailableDays, day]);
                           }
                         }}
-                        className={`btn sm ${isSelected ? 'primary' : ''}`}
-                        style={{ padding: '6px 12px', fontSize: '12px' }}
+                        style={{
+                          padding: '7px 14px',
+                          borderRadius: '8px',
+                          fontSize: '12px',
+                          fontWeight: 700,
+                          border: isSelected ? '1px solid #38BDF8' : '1px solid var(--line)',
+                          background: isSelected ? 'rgba(56, 189, 248, 0.15)' : 'var(--surface2)',
+                          color: isSelected ? '#38BDF8' : 'var(--muted)',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease'
+                        }}
                       >
                         {day}
                       </button>
@@ -512,10 +961,30 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
                 </div>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '12px' }}>
-                <button type="button" className="btn" onClick={() => setShowAdaptiveModal(false)}>Cancel</button>
-                <button type="submit" className="btn primary" disabled={generatingPlan}>
-                  {generatingPlan ? 'Calculating Timetable...' : 'Generate Personalized Timetable'}
+              {/* Action Buttons */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '10px' }}>
+                <button type="button" className="btn" onClick={() => setShowAdaptiveModal(false)}>
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={generatingPlan}
+                  className="btn primary"
+                  style={{
+                    background: 'linear-gradient(135deg, #0284C7 0%, #38BDF8 100%)',
+                    color: '#FFFFFF',
+                    border: 'none',
+                    fontWeight: 700
+                  }}
+                >
+                  {generatingPlan ? (
+                    <>
+                      <Icon name="refresh" size={14} className="animate-spin" />
+                      Generating Timetable...
+                    </>
+                  ) : (
+                    'Generate Timetable'
+                  )}
                 </button>
               </div>
             </form>

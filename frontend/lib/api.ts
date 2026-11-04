@@ -684,6 +684,35 @@ export const api = {
   },
 
   // ----------------- Phase 1: Core Learning & Interactive Studio -----------------
+  async getTopicVideo(token: string, topicId: string) {
+    return request(`/api/learning/topic/${topicId}/video`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` }
+    });
+  },
+
+  async generateTopicVideo(token: string, topicId: string, engine: string = 'remotion') {
+    return request(`/api/learning/topic/${topicId}/video/generate`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ engine })
+    });
+  },
+
+  async regenerateTopicVideo(token: string, topicId: string, engine: string = 'remotion') {
+    return request(`/api/learning/topic/${topicId}/video/regenerate`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ engine })
+    });
+  },
+
+  async getAIProviders(token: string) {
+    return request('/api/ai/providers', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` }
+    });
+  },
   async getInteractiveTopicStudio(token: string, topicId: string) {
     return request(`/api/learning/topic/${topicId}`, {
       method: 'GET',

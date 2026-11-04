@@ -21,7 +21,18 @@ from seed_data import seed_database
 
 init_db()
 
+from fastapi.staticfiles import StaticFiles
+import video_generator
+from ai_provider import ai_manager
+
 app = FastAPI(title="StudyPilot API", version="1.0.0")
+
+# Ensure static directories exist and mount static route
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+os.makedirs(os.path.join(STATIC_DIR, "videos"), exist_ok=True)
+os.makedirs(os.path.join(STATIC_DIR, "audio"), exist_ok=True)
+os.makedirs(os.path.join(STATIC_DIR, "uploads"), exist_ok=True)
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 app.add_middleware(
     CORSMiddleware,
@@ -2387,13 +2398,16 @@ def get_study_plan(exam_id: str, user: dict = Depends(get_current_user)):
     today_str = datetime.now().strftime("%Y-%m-%d")
     missed_count = 0
     if plan:
-        # Detect and flag missed sessions
-        cursor.execute("""
-            UPDATE study_plan_tasks
-            SET missed = 1
-            WHERE study_plan_id = ? AND scheduled_date < ? AND status = 'pending' AND (missed = 0 OR missed IS NULL)
-        """, (plan["id"], today_str))
-        conn.commit()
+        # Detect and flag missed sessions safely
+        try:
+            cursor.execute("""
+                UPDATE study_plan_tasks
+                SET missed = 1
+                WHERE study_plan_id = ? AND scheduled_date < ? AND status = 'pending' AND (missed = 0 OR missed IS NULL)
+            """, (plan["id"], today_str))
+            conn.commit()
+        except Exception as e:
+            print(f"[Study Plan Notice] Non-critical missed task flag sync: {e}")
 
         cursor.execute("""
             SELECT spt.*, t.topic_name, s.subject_name, s.color as subject_color, u.unit_name
@@ -3413,6 +3427,41 @@ async def get_interactive_topic_studio(topic_id: str, user: dict = Depends(get_c
             "last_interacted_at": int_dict.get("last_interacted_at")
         }
 
+    # Fetch educational video if already generated
+    cursor.execute("""
+        SELECT * FROM educational_videos
+        WHERE topic_id = ? AND user_id = ?
+        ORDER BY updated_at DESC
+        LIMIT 1
+    """, (topic_id, user["id"]))
+    v_row = cursor.fetchone()
+    video_data = None
+    if v_row:
+        video_data = dict(v_row)
+        for j_key in ["script_json", "scenes_json", "subtitles_json"]:
+            if video_data.get(j_key) and isinstance(video_data[j_key], str):
+                try:
+                    video_data[j_key] = json.loads(video_data[j_key])
+                except Exception:
+                    pass
+
+    # Ensure studio_content has all 13 sections populated
+    if studio_content:
+        fb_content = ai_service.generate_heuristic_topic_learning_studio(
+            topic_dict["topic_name"],
+            topic_dict.get("subject_name", "General"),
+            topic_dict.get("exam_name", "Target Examination"),
+            edu_level
+        )
+        for k13 in [
+            "topic_introduction", "learning_objectives", "simple_explanation",
+            "detailed_explanation", "important_definitions", "step_by_step_examples",
+            "real_world_applications", "important_formulas", "diagrams_and_visuals",
+            "points_to_remember", "topic_summary", "practice_questions", "faqs"
+        ]:
+            if k13 not in studio_content or not studio_content[k13]:
+                studio_content[k13] = fb_content.get(k13)
+
     level_profile = ai_service.LEVEL_PROFILES.get(edu_level, ai_service.LEVEL_PROFILES["competitive"])
     conn.close()
 
@@ -3421,7 +3470,8 @@ async def get_interactive_topic_studio(topic_id: str, user: dict = Depends(get_c
         "education_level": edu_level,
         "level_profile": level_profile,
         "studio_content": studio_content,
-        "interaction": interaction_data
+        "interaction": interaction_data,
+        "video": video_data
     }
 
 @app.post("/api/learning/topic/{topic_id}/interaction")
@@ -3571,6 +3621,76 @@ async def chat_with_in_topic_tutor(topic_id: str, req: TopicChatRequest, user: d
     conn.close()
 
     return {"reply": reply}
+
+class GenerateVideoRequest(BaseModel):
+    engine: Optional[str] = "remotion"  # 'remotion', 'manim', 'hybrid'
+
+@app.post("/api/learning/topic/{topic_id}/video/generate")
+@app.post("/api/topics/{topic_id}/video/generate")
+async def generate_topic_video_endpoint(topic_id: str, req: GenerateVideoRequest = GenerateVideoRequest(), user: dict = Depends(get_current_user)):
+    """Generates an animated educational video with narration, scenes, and subtitles."""
+    try:
+        result = await video_generator.create_or_regenerate_video(
+            topic_id=topic_id,
+            user_id=user["id"],
+            engine=req.engine or "remotion"
+        )
+        return {"success": True, "video": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/learning/topic/{topic_id}/video")
+@app.get("/api/topics/{topic_id}/video")
+async def get_topic_video_endpoint(topic_id: str, user: dict = Depends(get_current_user)):
+    """Retrieves existing educational video and animation scenes for this topic."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT * FROM educational_videos
+        WHERE topic_id = ? AND user_id = ?
+        ORDER BY updated_at DESC
+        LIMIT 1
+    """, (topic_id, user["id"]))
+    row = cur.fetchone()
+    conn.close()
+    if not row:
+        return {"has_video": False, "video": None}
+    r_dict = dict(row)
+    for j_field in ["script_json", "scenes_json", "subtitles_json"]:
+        if r_dict.get(j_field) and isinstance(r_dict[j_field], str):
+            try:
+                r_dict[j_field] = json.loads(r_dict[j_field])
+            except Exception:
+                pass
+    return {"has_video": True, "video": r_dict}
+
+@app.post("/api/learning/topic/{topic_id}/video/regenerate")
+@app.post("/api/topics/{topic_id}/video/regenerate")
+async def regenerate_topic_video_endpoint(topic_id: str, req: GenerateVideoRequest = GenerateVideoRequest(), user: dict = Depends(get_current_user)):
+    """Regenerates the animated video for this topic without affecting the rest of the lesson."""
+    try:
+        result = await video_generator.create_or_regenerate_video(
+            topic_id=topic_id,
+            user_id=user["id"],
+            engine=req.engine or "remotion"
+        )
+        return {"success": True, "message": "Video regenerated successfully", "video": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/ai/providers")
+async def get_ai_providers_endpoint(user: dict = Depends(get_current_user)):
+    """Health & availability of AI providers (Gemini, Groq, Ollama, Heuristics)."""
+    user_key = user.get("ai_api_key")
+    active = await ai_manager.get_active_providers(user_key)
+    return {
+        "providers": active,
+        "primary": "Gemini API (free tier eligible: gemini-2.0-flash / gemini-1.5-flash)",
+        "secondary": "Groq API (developer free tier: llama-3.3-70b-versatile / llama-3.1-8b-instant)",
+        "local": "Ollama (local offline: llama3 / mistral)",
+        "fallback": "Deterministic Educational Knowledge Base",
+        "metrics": ai_manager.request_counts
+    }
 
 @app.get("/api/learning/topic/{topic_id}/chat-history")
 def get_topic_chat_history(topic_id: str, user: dict = Depends(get_current_user)):
@@ -3831,7 +3951,10 @@ def create_adaptive_study_plan(req: AdaptivePlanCreateRequest, user: dict = Depe
         req.learning_pace or "normal"
     ))
 
-    cursor.execute("DELETE FROM study_plan_tasks WHERE study_plan_id IN (SELECT id FROM study_plans WHERE exam_id = ? AND user_id = ?)", (req.exam_id, user["id"]))
+    cursor.execute("SELECT id FROM study_plans WHERE exam_id = ? AND user_id = ?", (req.exam_id, user["id"]))
+    existing_plans = [r["id"] for r in cursor.fetchall()]
+    for p_id in existing_plans:
+        cursor.execute("DELETE FROM study_plan_tasks WHERE study_plan_id = ?", (p_id,))
 
     task_records = []
     date_idx = 0
@@ -4075,14 +4198,19 @@ def apply_smart_recovery_plan(recovery_id: str, req: RecoveryApplyRequest, user:
         task_id = t.get("task_id")
         new_date = t.get("new_date")
         if task_id and new_date:
+            cursor.execute("SELECT notes FROM study_plan_tasks WHERE id = ?", (task_id,))
+            t_row = cursor.fetchone()
+            curr_notes = (t_row["notes"] or "") if t_row else ""
+            tag = " [Rescheduled via Smart Recovery Planner]"
+            new_notes = curr_notes if tag in curr_notes else f"{curr_notes}{tag}"
             cursor.execute("""
                 UPDATE study_plan_tasks SET
                     original_date = COALESCE(original_date, scheduled_date),
                     scheduled_date = ?,
                     missed = 0,
-                    notes = COALESCE(notes, '') || ' [Rescheduled via Smart Recovery Planner]'
+                    notes = ?
                 WHERE id = ?
-            """, (new_date, task_id))
+            """, (new_date, new_notes, task_id))
 
     cursor.execute("UPDATE recovery_plans SET status = 'applied', applied_at = ? WHERE id = ?", (now_str, recovery_id))
     cursor.execute("UPDATE study_plans SET last_replan_at = ?, missed_tasks_count = 0 WHERE id = ?", (now_str, rec["study_plan_id"]))

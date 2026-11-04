@@ -472,3 +472,27 @@ CREATE TABLE IF NOT EXISTS predicted_papers (
     FOREIGN KEY (exam_id) REFERENCES exams(id) ON DELETE CASCADE,
     INDEX idx_pred_user_exam (user_id, exam_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
+CREATE TABLE IF NOT EXISTS educational_videos (
+    id VARCHAR(64) PRIMARY KEY,
+    user_id VARCHAR(64) NOT NULL,
+    topic_id VARCHAR(64) NOT NULL,
+    exam_id VARCHAR(64) NULL,
+    title VARCHAR(255) NOT NULL,
+    engine VARCHAR(50) NOT NULL DEFAULT 'remotion',
+    status VARCHAR(50) NOT NULL DEFAULT 'completed',
+    duration_seconds DECIMAL(6, 2) DEFAULT 0.0,
+    video_url TEXT NULL,
+    thumbnail_url TEXT NULL,
+    script_json LONGTEXT NULL,
+    scenes_json LONGTEXT NULL,
+    subtitles_json LONGTEXT NULL,
+    error_message TEXT NULL,
+    created_at VARCHAR(100) NOT NULL,
+    updated_at VARCHAR(100) NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (topic_id) REFERENCES topics(id) ON DELETE CASCADE,
+    INDEX idx_video_topic (topic_id),
+    INDEX idx_video_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

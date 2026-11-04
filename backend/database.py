@@ -170,7 +170,7 @@ def get_db():
                 password=password,
                 database=database,
                 cursorclass=pymysql.cursors.DictCursor,
-                autocommit=False
+                autocommit=True
             )
             return MySQLConnectionWrapper(raw_conn)
         except Exception as e:
@@ -845,6 +845,32 @@ def init_db():
     );
     """)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_pred_user_exam ON predicted_papers(user_id, exam_id);")
+
+    # 28. educational_videos (Animated Educational Videos for Topics)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS educational_videos (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        topic_id TEXT NOT NULL,
+        exam_id TEXT,
+        title TEXT NOT NULL,
+        engine TEXT NOT NULL DEFAULT 'remotion',
+        status TEXT NOT NULL DEFAULT 'completed',
+        duration_seconds REAL DEFAULT 0.0,
+        video_url TEXT,
+        thumbnail_url TEXT,
+        script_json TEXT,
+        scenes_json TEXT,
+        subtitles_json TEXT,
+        error_message TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+        FOREIGN KEY (topic_id) REFERENCES topics (id) ON DELETE CASCADE
+    );
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_video_topic ON educational_videos(topic_id);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_video_user ON educational_videos(user_id);")
 
     conn.commit()
     conn.close()

@@ -413,3 +413,25 @@ CREATE TABLE IF NOT EXISTS predicted_papers (
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_pred_user_exam ON predicted_papers(user_id, exam_id);
+
+
+CREATE TABLE IF NOT EXISTS educational_videos (
+    id VARCHAR(64) PRIMARY KEY,
+    user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    topic_id VARCHAR(64) NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+    exam_id VARCHAR(64) REFERENCES exams(id) ON DELETE CASCADE,
+    title VARCHAR(255) NOT NULL,
+    engine VARCHAR(50) NOT NULL DEFAULT 'remotion',
+    status VARCHAR(50) NOT NULL DEFAULT 'completed',
+    duration_seconds DECIMAL(6, 2) DEFAULT 0.0,
+    video_url TEXT,
+    thumbnail_url TEXT,
+    script_json TEXT,
+    scenes_json TEXT,
+    subtitles_json TEXT,
+    error_message TEXT,
+    created_at VARCHAR(100) NOT NULL,
+    updated_at VARCHAR(100) NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_video_topic ON educational_videos(topic_id);
+CREATE INDEX IF NOT EXISTS idx_video_user ON educational_videos(user_id);

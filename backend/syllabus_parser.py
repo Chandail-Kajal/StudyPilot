@@ -9,6 +9,18 @@ from pypdf import PdfReader
 import openpyxl
 
 try:
+    import fitz  # PyMuPDF
+    HAS_PYMUPDF = True
+except ImportError:
+    HAS_PYMUPDF = False
+
+try:
+    import pandas as pd
+    HAS_PANDAS = True
+except ImportError:
+    HAS_PANDAS = False
+
+try:
     import xlrd
     HAS_XLRD = True
 except ImportError:
@@ -130,7 +142,20 @@ def detect_column_mappings(headers: List[str]) -> Dict[str, str]:
     return mapping
 
 def extract_text_from_pdf(file_bytes: bytes) -> str:
-    """Extracts raw text content from uploaded PDF bytes."""
+    """Extracts raw text content using PyMuPDF (fitz) or fallback to pypdf."""
+    if HAS_PYMUPDF:
+        try:
+            doc = fitz.open(stream=file_bytes, filetype="pdf")
+            extracted = []
+            for i, page in enumerate(doc):
+                text = page.get_text("text")
+                if text and text.strip():
+                    extracted.append(f"--- Page {i+1} ---\n" + text)
+            if extracted:
+                return "\n\n".join(extracted)
+        except Exception as e:
+            print(f"[Syllabus Parser Notice] PyMuPDF extract failed: {e}. Falling back to pypdf.")
+
     reader = PdfReader(io.BytesIO(file_bytes))
     extracted = []
     for i, page in enumerate(reader.pages):
