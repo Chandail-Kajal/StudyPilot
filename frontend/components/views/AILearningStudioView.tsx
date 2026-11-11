@@ -8,6 +8,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Exam } from '@/types';
 import { api } from '@/lib/api';
 import { Icon } from '../Icons';
+import { AIAvatarInstructor, AvatarPersona, AvatarLayout } from '../AIAvatarInstructor';
 
 interface AILearningStudioViewProps {
   token: string | null;
@@ -18,71 +19,413 @@ interface AILearningStudioViewProps {
   onOpenPracticeForTopic?: (topicId: string) => void;
 }
 
-// Helper to ensure flowchart and diagram SVGs never overflow their boxes and wrap text cleanly
-const formatDiagramSvg = (rawSvg?: string | null, topicName: string = 'Core Concept'): string => {
-  if (!rawSvg) return '';
-  const cleanT = topicName.trim() || 'Core Concept';
+// ============================================================================
+// Robust SVG Multi-Line Text Wrapping & Archetype Diagram Engine (Frontend)
+// Guarantees zero text overflow, perfect vertical/horizontal alignment & rich visuals
+// ============================================================================
 
-  // Check if this SVG is the 3-node flowchart: Input -> Topic -> Output
-  if ((rawSvg.includes('Input Stimulus') || rawSvg.includes('Input State')) && rawSvg.includes('Output')) {
-    return `<svg viewBox="0 0 620 140" width="100%" height="100%" style="max-height: 140px; display: block; margin: 0 auto;">
-      <defs>
-        <linearGradient id="coreGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stop-color="#0A6C9E" />
-          <stop offset="100%" stop-color="#0284C7" />
-        </linearGradient>
-        <linearGradient id="outGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stop-color="#1B8553" />
-          <stop offset="100%" stop-color="#10B981" />
-        </linearGradient>
-      </defs>
-      
-      <!-- Input State Box -->
-      <rect x="20" y="42" width="125" height="52" rx="10" fill="#141E2A" stroke="#263648" stroke-width="1.5" />
-      <text x="82" y="73" fill="#92A3B5" font-size="12" font-weight="600" font-family="system-ui, sans-serif" text-anchor="middle">Input State</text>
-      
-      <!-- Connecting Arrow 1 -->
-      <line x1="145" y1="68" x2="195" y2="68" stroke="#54C2F0" stroke-width="2.5" stroke-dasharray="4" />
-      <polygon points="195,68 188,64 188,72" fill="#54C2F0" />
-      
-      <!-- Center Topic Box: Wide 230px, foreignObject wraps text automatically without clipping -->
-      <rect x="195" y="28" width="230" height="80" rx="14" fill="url(#coreGrad)" stroke="#54C2F0" stroke-width="1.5" />
-      <foreignObject x="195" y="28" width="230" height="80">
-        <div xmlns="http://www.w3.org/1999/xhtml" style="display:flex;align-items:center;justify-content:center;height:100%;text-align:center;color:#FFFFFF;font-size:13px;font-weight:700;line-height:1.25;padding:6px 14px;font-family:system-ui,-apple-system,sans-serif;word-break:break-word;overflow:hidden;">
-          ${cleanT}
-        </div>
-      </foreignObject>
-      
-      <!-- Connecting Arrow 2 -->
-      <line x1="425" y1="68" x2="475" y2="68" stroke="#4CC98A" stroke-width="2.5" />
-      <polygon points="475,68 468,64 468,72" fill="#4CC98A" />
-      
-      <!-- Output Box -->
-      <rect x="475" y="42" width="125" height="52" rx="10" fill="url(#outGrad)" stroke="#4CC98A" stroke-width="1.5" />
-      <text x="537" y="73" fill="#FFFFFF" font-size="12" font-weight="700" font-family="system-ui, sans-serif" text-anchor="middle">Output State</text>
-    </svg>`;
+function splitTextIntoTspans(
+  text: string,
+  centerX: number,
+  centerY: number,
+  maxCharsPerLine: number = 20,
+  fontSize: number = 13,
+  lineHeight: number = 17,
+  fillColor: string = '#FFFFFF'
+): string {
+  const words = (text || '').trim().split(/\s+/);
+  const lines: string[] = [];
+  let currentLine = '';
+
+  for (const word of words) {
+    if (!currentLine) {
+      currentLine = word;
+    } else if ((currentLine + ' ' + word).length <= maxCharsPerLine) {
+      currentLine += ' ' + word;
+    } else {
+      lines.push(currentLine);
+      currentLine = word;
+    }
+  }
+  if (currentLine) lines.push(currentLine);
+  if (lines.length === 0) lines.push(text || 'Concept');
+
+  const totalH = (lines.length - 1) * lineHeight;
+  const startY = centerY - totalH / 2;
+
+  const tspans = lines
+    .map((line, idx) => `<tspan x="${centerX}" y="${(startY + idx * lineHeight).toFixed(1)}">${line}</tspan>`)
+    .join('');
+
+  return `<text x="${centerX}" fill="${fillColor}" font-size="${fontSize}" font-weight="700" font-family="system-ui, -apple-system, sans-serif" text-anchor="middle">${tspans}</text>`;
+}
+
+function detectTopicArchetype(topicName: string = '', subjectName: string = ''): 'data_structure' | 'cycle' | 'pipeline' | 'formula' | 'concept' {
+  const combined = `${topicName} ${subjectName}`.toLowerCase();
+  if (['linked list', 'binary tree', 'bst', 'heap', 'stack', 'queue', 'graph', 'hash table', 'data structure', 'pointer', 'node'].some(k => combined.includes(k))) {
+    return 'data_structure';
+  }
+  if (['cycle', 'krebs', 'carbon', 'nitrogen', 'water cycle', 'calvin', 'cardiac', 'cell cycle', 'carnot', 'refrigeration', 'circulation'].some(k => combined.includes(k))) {
+    return 'cycle';
+  }
+  if (['how it works', 'pipeline', 'protocol', 'compiler', 'dns', 'http', 'internet', 'digestion', 'reflex', 'algorithm', 'process', 'synthesis', 'transmission'].some(k => combined.includes(k))) {
+    return 'pipeline';
+  }
+  if (['formula', 'equation', 'law', 'derivation', 'energy', 'force', 'gravity', 'calculus', 'velocity', 'acceleration', 'ohm', 'thermodynamics', 'integral', 'derivative'].some(k => combined.includes(k))) {
+    return 'formula';
+  }
+  return 'concept';
+}
+
+function renderLinkedListSvg(topicName: string): string {
+  const titleTspans = splitTextIntoTspans(topicName, 360, 24, 38, 13, 17, '#38BDF8');
+  return `<svg viewBox="0 0 720 170" width="100%" height="100%" style="max-height: 170px; display: block; margin: 0 auto;">
+  <defs>
+    <linearGradient id="feNodeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0F2438"/>
+      <stop offset="100%" stop-color="#0369A1"/>
+    </linearGradient>
+    <marker id="feArrNext" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#38BDF8"/>
+    </marker>
+    <marker id="feArrPrev" viewBox="0 0 10 10" refX="4" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 10 1 L 0 5 L 10 9 z" fill="#C084FC"/>
+    </marker>
+  </defs>
+
+  ${titleTspans}
+
+  <!-- Node 1: HEAD -->
+  <g transform="translate(40, 52)">
+    <rect width="160" height="72" rx="10" fill="url(#feNodeGrad)" stroke="#38BDF8" stroke-width="1.8"/>
+    <rect x="0" y="0" width="95" height="72" rx="10" fill="rgba(56, 189, 248, 0.1)"/>
+    <line x1="95" y1="0" x2="95" y2="72" stroke="#38BDF8" stroke-width="1.5" stroke-dasharray="3"/>
+    <text x="48" y="32" fill="#94A3B8" font-size="10" font-family="monospace" text-anchor="middle">HEAD [0]</text>
+    <text x="48" y="52" fill="#FFFFFF" font-size="14" font-weight="700" font-family="monospace" text-anchor="middle">val: 12</text>
+    <circle cx="128" cy="36" r="6" fill="#38BDF8"/>
+    <text x="128" y="55" fill="#38BDF8" font-size="9" font-family="monospace" text-anchor="middle">next</text>
+  </g>
+
+  <!-- Forward Pointer (Node 1 -> Node 2) -->
+  <line x1="200" y1="76" x2="265" y2="76" stroke="#38BDF8" stroke-width="2.5" marker-end="url(#feArrNext)"/>
+  <!-- Backward Pointer (Node 2 -> Node 1 for Doubly) -->
+  <line x1="265" y1="96" x2="200" y2="96" stroke="#C084FC" stroke-width="2" stroke-dasharray="3" marker-start="url(#feArrPrev)"/>
+
+  <!-- Node 2 -->
+  <g transform="translate(275, 52)">
+    <rect width="160" height="72" rx="10" fill="url(#feNodeGrad)" stroke="#38BDF8" stroke-width="1.8"/>
+    <rect x="0" y="0" width="95" height="72" rx="10" fill="rgba(56, 189, 248, 0.1)"/>
+    <line x1="95" y1="0" x2="95" y2="72" stroke="#38BDF8" stroke-width="1.5" stroke-dasharray="3"/>
+    <text x="48" y="32" fill="#94A3B8" font-size="10" font-family="monospace" text-anchor="middle">NODE [1]</text>
+    <text x="48" y="52" fill="#FFFFFF" font-size="14" font-weight="700" font-family="monospace" text-anchor="middle">val: 45</text>
+    <circle cx="128" cy="36" r="6" fill="#38BDF8"/>
+    <text x="128" y="55" fill="#38BDF8" font-size="9" font-family="monospace" text-anchor="middle">next</text>
+  </g>
+
+  <!-- Forward Pointer (Node 2 -> Node 3) -->
+  <line x1="435" y1="76" x2="500" y2="76" stroke="#38BDF8" stroke-width="2.5" marker-end="url(#feArrNext)"/>
+  <!-- Backward Pointer (Node 3 -> Node 2 for Doubly) -->
+  <line x1="500" y1="96" x2="435" y2="96" stroke="#C084FC" stroke-width="2" stroke-dasharray="3" marker-start="url(#feArrPrev)"/>
+
+  <!-- Node 3: TAIL -->
+  <g transform="translate(510, 52)">
+    <rect width="160" height="72" rx="10" fill="url(#feNodeGrad)" stroke="#10B981" stroke-width="1.8"/>
+    <rect x="0" y="0" width="95" height="72" rx="10" fill="rgba(16, 185, 129, 0.1)"/>
+    <line x1="95" y1="0" x2="95" y2="72" stroke="#10B981" stroke-width="1.5" stroke-dasharray="3"/>
+    <text x="48" y="32" fill="#94A3B8" font-size="10" font-family="monospace" text-anchor="middle">TAIL [2]</text>
+    <text x="48" y="52" fill="#FFFFFF" font-size="14" font-weight="700" font-family="monospace" text-anchor="middle">val: 99</text>
+    <rect x="110" y="26" width="36" height="20" rx="4" fill="#0C131B" stroke="#64748B"/>
+    <text x="128" y="40" fill="#EF4444" font-size="10" font-weight="700" font-family="monospace" text-anchor="middle">NULL</text>
+  </g>
+
+  <!-- Legend -->
+  <g transform="translate(200, 150)">
+    <line x1="0" y1="6" x2="25" y2="6" stroke="#38BDF8" stroke-width="2.5"/>
+    <text x="32" y="10" fill="#94A3B8" font-size="11" font-family="system-ui">Next Pointer (Singly/Doubly)</text>
+    <line x1="210" y1="6" x2="235" y2="6" stroke="#C084FC" stroke-width="2" stroke-dasharray="3"/>
+    <text x="242" y="10" fill="#94A3B8" font-size="11" font-family="system-ui">Prev Pointer (Doubly Only)</text>
+  </g>
+</svg>`;
+}
+
+function renderCycleSvg(topicName: string): string {
+  const centerTspans = splitTextIntoTspans(topicName, 360, 110, 18, 12, 16, '#FFFFFF');
+  return `<svg viewBox="0 0 720 220" width="100%" height="100%" style="max-height: 220px; display: block; margin: 0 auto;">
+  <defs>
+    <linearGradient id="feCycleCenter" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0C1E32"/>
+      <stop offset="100%" stop-color="#082F49"/>
+    </linearGradient>
+  </defs>
+
+  <path id="feOrbitLoop" d="M 360,35 A 190,75 0 1,1 359.9,35 Z" fill="none" stroke="rgba(56, 189, 248, 0.25)" stroke-width="2" stroke-dasharray="6 4"/>
+  <circle r="4.5" fill="#38BDF8">
+    <animateMotion dur="5s" repeatCount="indefinite">
+      <mpath href="#feOrbitLoop"/>
+    </animateMotion>
+  </circle>
+  <circle r="4" fill="#34D399">
+    <animateMotion dur="5s" begin="-2.5s" repeatCount="indefinite">
+      <mpath href="#feOrbitLoop"/>
+    </animateMotion>
+  </circle>
+
+  <g transform="translate(280, 8)">
+    <rect width="160" height="42" rx="10" fill="#141E2A" stroke="#38BDF8" stroke-width="1.5"/>
+    <text x="80" y="20" fill="#38BDF8" font-size="10" font-weight="800" font-family="system-ui" text-anchor="middle">STAGE 1: GENESIS</text>
+    <text x="80" y="34" fill="#E2E8F0" font-size="11" font-weight="600" font-family="system-ui" text-anchor="middle">Input / Evaporation</text>
+  </g>
+
+  <g transform="translate(530, 88)">
+    <rect width="160" height="42" rx="10" fill="#141E2A" stroke="#38BDF8" stroke-width="1.5"/>
+    <text x="80" y="20" fill="#38BDF8" font-size="10" font-weight="800" font-family="system-ui" text-anchor="middle">STAGE 2: TRANSFORMATION</text>
+    <text x="80" y="34" fill="#E2E8F0" font-size="11" font-weight="600" font-family="system-ui" text-anchor="middle">Condensation / Synthesis</text>
+  </g>
+
+  <g transform="translate(280, 168)">
+    <rect width="160" height="42" rx="10" fill="#141E2A" stroke="#10B981" stroke-width="1.5"/>
+    <text x="80" y="20" fill="#10B981" font-size="10" font-weight="800" font-family="system-ui" text-anchor="middle">STAGE 3: RELEASE</text>
+    <text x="80" y="34" fill="#E2E8F0" font-size="11" font-weight="600" font-family="system-ui" text-anchor="middle">Precipitation / Action</text>
+  </g>
+
+  <g transform="translate(30, 88)">
+    <rect width="160" height="42" rx="10" fill="#141E2A" stroke="#C084FC" stroke-width="1.5"/>
+    <text x="80" y="20" fill="#C084FC" font-size="10" font-weight="800" font-family="system-ui" text-anchor="middle">STAGE 4: RECOVERY</text>
+    <text x="80" y="34" fill="#E2E8F0" font-size="11" font-weight="600" font-family="system-ui" text-anchor="middle">Return to Initial State</text>
+  </g>
+
+  <circle cx="360" cy="110" r="48" fill="url(#feCycleCenter)" stroke="#38BDF8" stroke-width="2"/>
+  ${centerTspans}
+</svg>`;
+}
+
+function renderPipelineSvg(topicName: string): string {
+  const titleTspans = splitTextIntoTspans(topicName, 360, 24, 38, 13, 17, '#38BDF8');
+  return `<svg viewBox="0 0 720 150" width="100%" height="100%" style="max-height: 150px; display: block; margin: 0 auto;">
+  <defs>
+    <linearGradient id="fePipeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0F2438"/>
+      <stop offset="100%" stop-color="#0369A1"/>
+    </linearGradient>
+    <marker id="fePipeArr" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#38BDF8"/>
+    </marker>
+  </defs>
+
+  ${titleTspans}
+
+  <g transform="translate(20, 50)">
+    <rect width="140" height="64" rx="10" fill="#141E2A" stroke="#38BDF8" stroke-width="1.5"/>
+    <text x="70" y="28" fill="#38BDF8" font-size="10" font-weight="800" font-family="system-ui" text-anchor="middle">STEP 1: INGESTION</text>
+    <text x="70" y="48" fill="#FFFFFF" font-size="12" font-weight="600" font-family="system-ui" text-anchor="middle">Input Request</text>
+  </g>
+  <line x1="160" y1="82" x2="195" y2="82" stroke="#38BDF8" stroke-width="2" marker-end="url(#fePipeArr)"/>
+
+  <g transform="translate(195, 50)">
+    <rect width="150" height="64" rx="10" fill="url(#fePipeGrad)" stroke="#38BDF8" stroke-width="1.8"/>
+    <text x="75" y="28" fill="#54C2F0" font-size="10" font-weight="800" font-family="system-ui" text-anchor="middle">STEP 2: PARSER</text>
+    <text x="75" y="48" fill="#FFFFFF" font-size="12" font-weight="600" font-family="system-ui" text-anchor="middle">Validation & Routing</text>
+  </g>
+  <line x1="345" y1="82" x2="380" y2="82" stroke="#38BDF8" stroke-width="2" marker-end="url(#fePipeArr)"/>
+
+  <g transform="translate(380, 50)">
+    <rect width="150" height="64" rx="10" fill="url(#fePipeGrad)" stroke="#818CF8" stroke-width="1.8"/>
+    <text x="75" y="28" fill="#C084FC" font-size="10" font-weight="800" font-family="system-ui" text-anchor="middle">STEP 3: EXECUTION</text>
+    <text x="75" y="48" fill="#FFFFFF" font-size="12" font-weight="600" font-family="system-ui" text-anchor="middle">Core Compute Rule</text>
+  </g>
+  <line x1="530" y1="82" x2="565" y2="82" stroke="#10B981" stroke-width="2" marker-end="url(#fePipeArr)"/>
+
+  <g transform="translate(565, 50)">
+    <rect width="135" height="64" rx="10" fill="#064E3B" stroke="#10B981" stroke-width="1.5"/>
+    <text x="67" y="28" fill="#10B981" font-size="10" font-weight="800" font-family="system-ui" text-anchor="middle">STEP 4: OUTPUT</text>
+    <text x="67" y="48" fill="#FFFFFF" font-size="12" font-weight="600" font-family="system-ui" text-anchor="middle">Verified Result</text>
+  </g>
+
+  <circle r="4" fill="#38BDF8">
+    <animate attributeName="cx" values="160;565" dur="3s" repeatCount="indefinite"/>
+    <animate attributeName="cy" values="82;82" dur="3s" repeatCount="indefinite"/>
+  </circle>
+</svg>`;
+}
+
+function renderFormulaSvg(topicName: string): string {
+  const titleTspans = splitTextIntoTspans(topicName, 150, 95, 20, 12, 16, '#FFFFFF');
+  return `<svg viewBox="0 0 720 160" width="100%" height="100%" style="max-height: 160px; display: block; margin: 0 auto;">
+  <defs>
+    <linearGradient id="feEqGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1E1B4B"/>
+      <stop offset="100%" stop-color="#312E81"/>
+    </linearGradient>
+  </defs>
+
+  <g transform="translate(20, 20)">
+    <rect width="260" height="120" rx="12" fill="url(#feEqGrad)" stroke="#818CF8" stroke-width="1.8"/>
+    <text x="130" y="32" fill="#C084FC" font-size="10" font-weight="800" font-family="system-ui" letter-spacing="1" text-anchor="middle">GOVERNING EQUATION</text>
+    <text x="130" y="66" fill="#FBBF24" font-size="20" font-weight="700" font-family="serif" text-anchor="middle">y = f(x) · ΔS / Δt</text>
+  </g>
+  ${titleTspans}
+
+  <g transform="translate(300, 20)">
+    <rect width="400" height="120" rx="12" fill="#0F172A" stroke="#334155" stroke-width="1.5"/>
+
+    <g transform="translate(18, 22)">
+      <circle cx="10" cy="10" r="10" fill="rgba(56, 189, 248, 0.2)"/>
+      <text x="10" y="14" fill="#38BDF8" font-size="10" font-weight="800" text-anchor="middle">1</text>
+      <text x="30" y="14" fill="#E2E8F0" font-size="12" font-weight="600" font-family="system-ui">Identify given variables and convert units to SI standard</text>
+    </g>
+
+    <g transform="translate(18, 56)">
+      <circle cx="10" cy="10" r="10" fill="rgba(192, 132, 252, 0.2)"/>
+      <text x="10" y="14" fill="#C084FC" font-size="10" font-weight="800" text-anchor="middle">2</text>
+      <text x="30" y="14" fill="#E2E8F0" font-size="12" font-weight="600" font-family="system-ui">Apply algebraic transformation and boundary constraints</text>
+    </g>
+
+    <g transform="translate(18, 90)">
+      <circle cx="10" cy="10" r="10" fill="rgba(16, 185, 129, 0.2)"/>
+      <text x="10" y="14" fill="#10B981" font-size="10" font-weight="800" text-anchor="middle">3</text>
+      <text x="30" y="14" fill="#10B981" font-size="12" font-weight="700" font-family="system-ui">Dimensional consistency checked → Final calibrated answer</text>
+    </g>
+  </g>
+</svg>`;
+}
+
+function renderArchitectureFlowSvg(topicName: string): string {
+  const centerTspans = splitTextIntoTspans(topicName, 360, 78, 22, 13, 17, '#FFFFFF');
+  return `<svg viewBox="0 0 720 160" width="100%" height="100%" style="max-height: 160px; display: block; margin: 0 auto;">
+  <defs>
+    <linearGradient id="feArchCoreGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0C2338"/>
+      <stop offset="100%" stop-color="#0369A1"/>
+    </linearGradient>
+    <linearGradient id="feArchInGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#141E2A"/>
+      <stop offset="100%" stop-color="#1E293B"/>
+    </linearGradient>
+    <linearGradient id="feArchOutGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#064E3B"/>
+      <stop offset="100%" stop-color="#047857"/>
+    </linearGradient>
+    <marker id="feArchArr1" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#38BDF8"/>
+    </marker>
+    <marker id="feArchArr2" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#10B981"/>
+    </marker>
+  </defs>
+
+  <!-- Left: Input State -->
+  <g transform="translate(24, 44)">
+    <rect width="130" height="62" rx="12" fill="url(#feArchInGrad)" stroke="#334155" stroke-width="1.5"/>
+    <text x="65" y="32" fill="#94A3B8" font-size="12" font-weight="700" font-family="system-ui" text-anchor="middle">Input Stimulus</text>
+    <text x="65" y="49" fill="#64748B" font-size="10" font-family="monospace" text-anchor="middle">[Initial State]</text>
+  </g>
+
+  <!-- Line 1: Input -> Core -->
+  <line x1="154" y1="75" x2="208" y2="75" stroke="#38BDF8" stroke-width="2.5" stroke-dasharray="4" marker-end="url(#feArchArr1)"/>
+  <circle r="3.5" fill="#38BDF8">
+    <animate attributeName="cx" from="154" to="208" dur="1.8s" repeatCount="indefinite"/>
+    <animate attributeName="cy" values="75;75" dur="1.8s" repeatCount="indefinite"/>
+  </circle>
+
+  <!-- Center: Core Governing Principle Box (Spacious 288px wide, wrapped text, never overflows) -->
+  <g transform="translate(216, 28)">
+    <rect width="288" height="94" rx="14" fill="url(#feArchCoreGrad)" stroke="#38BDF8" stroke-width="1.8"/>
+    <text x="144" y="24" fill="#54C2F0" font-size="10" font-weight="800" font-family="system-ui" letter-spacing="1" text-anchor="middle">✦ CORE MECHANISM</text>
+  </g>
+  ${centerTspans}
+
+  <!-- Line 2: Core -> Output -->
+  <line x1="504" y1="75" x2="558" y2="75" stroke="#10B981" stroke-width="2.5" marker-end="url(#feArchArr2)"/>
+  <circle r="3.5" fill="#10B981">
+    <animate attributeName="cx" from="504" to="558" dur="1.8s" repeatCount="indefinite"/>
+    <animate attributeName="cy" values="75;75" dur="1.8s" repeatCount="indefinite"/>
+  </circle>
+
+  <!-- Right: Output State -->
+  <g transform="translate(566, 44)">
+    <rect width="130" height="62" rx="12" fill="url(#feArchOutGrad)" stroke="#10B981" stroke-width="1.5"/>
+    <text x="65" y="32" fill="#FFFFFF" font-size="12" font-weight="700" font-family="system-ui" text-anchor="middle">Stable Output</text>
+    <text x="65" y="49" fill="#A7F3D0" font-size="10" font-family="monospace" text-anchor="middle">[Equilibrium]</text>
+  </g>
+</svg>`;
+}
+
+function renderConceptBadgeSvg(topicName: string): string {
+  const titleTspans = splitTextIntoTspans(topicName, 360, 105, 28, 15, 19, '#FFFFFF');
+  return `<svg viewBox="0 0 720 160" width="100%" height="100%" style="max-height: 160px; display: block; margin: 0 auto;">
+  <rect x="20" y="16" width="680" height="128" rx="16" fill="#111C2B" stroke="#0284C7" stroke-width="1.8"/>
+  <circle cx="360" cy="52" r="26" fill="#0284C7"/>
+  <text x="360" y="58" fill="#FFFFFF" font-size="18" text-anchor="middle" font-weight="bold">✦</text>
+  ${titleTspans}
+  <text x="360" y="132" fill="#38BDF8" font-size="11" font-weight="600" font-family="system-ui" text-anchor="middle">Core Educational Pillar</text>
+</svg>`;
+}
+
+function renderRecapChecklistSvg(topicName: string): string {
+  return `<svg viewBox="0 0 720 140" width="100%" height="100%" style="max-height: 140px; display: block; margin: 0 auto;">
+  <rect x="20" y="12" width="680" height="116" rx="14" fill="#0F172A" stroke="#38BDF8" stroke-width="1.5"/>
+  <g transform="translate(60, 42)">
+    <circle cx="10" cy="10" r="10" fill="#10B981"/>
+    <text x="10" y="14" fill="#FFFFFF" font-size="11" font-weight="900" text-anchor="middle">✓</text>
+    <text x="32" y="14" fill="#F1F5F9" font-size="13" font-weight="600" font-family="system-ui">Foundational Definitions & Core Invariants Understood</text>
+  </g>
+  <g transform="translate(60, 72)">
+    <circle cx="10" cy="10" r="10" fill="#10B981"/>
+    <text x="10" y="14" fill="#FFFFFF" font-size="11" font-weight="900" text-anchor="middle">✓</text>
+    <text x="32" y="14" fill="#F1F5F9" font-size="13" font-weight="600" font-family="system-ui">Dimensional Limits, SI Units & Governing Equations Verified</text>
+  </g>
+  <g transform="translate(60, 102)">
+    <circle cx="10" cy="10" r="10" fill="#38BDF8"/>
+    <text x="10" y="14" fill="#0C131B" font-size="11" font-weight="900" text-anchor="middle">★</text>
+    <text x="32" y="14" fill="#38BDF8" font-size="13" font-weight="700" font-family="system-ui">Practice Test Drills & Common Trap Elimination Mastered</text>
+  </g>
+</svg>`;
+}
+
+// Master formatter: intercepts any SVG and ensures it uses the wrapped, archetype-appropriate SVG
+const formatDiagramSvg = (rawSvg?: string | null, topicName: string = 'Core Concept', subjectName: string = ''): string => {
+  const cleanT = (topicName || 'Core Concept').trim();
+  const arch = detectTopicArchetype(cleanT, subjectName);
+
+  // If already clean and responsive with tspan text and 720 viewBox, return as-is
+  if (rawSvg && rawSvg.includes('viewBox="0 0 720') && rawSvg.includes('<tspan')) {
+    return rawSvg;
   }
 
-  // Check if this SVG is the concept badge
-  if (rawSvg.includes('✦') && (rawSvg.includes('circle') || rawSvg.includes('concept_badge'))) {
-    return `<svg viewBox="0 0 420 180" width="100%" height="100%" style="max-height: 160px; display: block; margin: 0 auto;">
-      <rect x="20" y="20" width="380" height="140" rx="16" fill="#141E2A" stroke="#0A6C9E" stroke-width="2"/>
-      <circle cx="210" cy="60" r="28" fill="#0A6C9E"/>
-      <text x="210" y="67" fill="#FFFFFF" font-size="18" text-anchor="middle" font-weight="bold">✦</text>
-      <foreignObject x="30" y="100" width="360" height="50">
-        <div xmlns="http://www.w3.org/1999/xhtml" style="display:flex;align-items:center;justify-content:center;height:100%;text-align:center;color:#E8EEF4;font-size:14px;font-weight:700;font-family:system-ui,-apple-system,sans-serif;word-break:break-word;overflow:hidden;">
-          ${cleanT}
-        </div>
-      </foreignObject>
-    </svg>`;
+  // If topic is data structure (e.g. Singly and Doubly Linked Lists), ALWAYS return the linked list diagram!
+  if (arch === 'data_structure') {
+    return renderLinkedListSvg(cleanT);
   }
 
-  if (rawSvg.includes("width='140'") || rawSvg.includes('width="140"')) {
-    return rawSvg.replace(/width=['"]140['"]/g, 'width="220"');
+  // If rawSvg represents concept badge
+  if (rawSvg && (rawSvg.includes('✦') || rawSvg.includes('concept_badge'))) {
+    return renderConceptBadgeSvg(cleanT);
   }
 
-  return rawSvg;
+  // If rawSvg represents checklist or summary
+  if (rawSvg && (rawSvg.includes('checklist') || rawSvg.includes('✔') || rawSvg.includes('✓'))) {
+    return renderRecapChecklistSvg(cleanT);
+  }
+
+  // If topic is cycle
+  if (arch === 'cycle') {
+    return renderCycleSvg(cleanT);
+  }
+
+  // If topic is pipeline
+  if (arch === 'pipeline') {
+    return renderPipelineSvg(cleanT);
+  }
+
+  // If topic is formula
+  if (arch === 'formula') {
+    return renderFormulaSvg(cleanT);
+  }
+
+  // Otherwise return spacious, auto-wrapped 3-block architecture flow
+  return renderArchitectureFlowSvg(cleanT);
 };
+
 
 export const AILearningStudioView: React.FC<AILearningStudioViewProps> = ({
   token,
@@ -106,6 +449,34 @@ export const AILearningStudioView: React.FC<AILearningStudioViewProps> = ({
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
   const [showCaptions, setShowCaptions] = useState(true);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [volume, setVolume] = useState<number>(85);
+  const [isMuted, setIsMuted] = useState<boolean>(false);
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const [videoHover, setVideoHover] = useState<boolean>(false);
+
+  const resolvedAudioUrl = videoData?.audio_url ||
+    (videoData?.video_url && (videoData.video_url.endsWith('.wav') || videoData.video_url.endsWith('.mp3') || videoData.video_url.includes('/static/audio/'))
+      ? videoData.video_url
+      : null);
+
+  // AI Avatar Instructor State
+  const [showAvatar, setShowAvatar] = useState<boolean>(true);
+  const [avatarPersona, setAvatarPersona] = useState<AvatarPersona>('scholar');
+  const [avatarLayout, setAvatarLayout] = useState<AvatarLayout>('pip');
+
+  // 9-Step Masterclass Journey State
+  const [masteryStep, setMasteryStep] = useState<number>(1);
+
+  // Lesson Text Audio Reader State
+  const [isLessonAudioPlaying, setIsLessonAudioPlaying] = useState<boolean>(false);
+  const [lessonAudioSpeed, setLessonAudioSpeed] = useState<number>(1.0);
+  const [lessonAudioVolume, setLessonAudioVolume] = useState<number>(85);
+  const [lessonAudioMuted, setLessonAudioMuted] = useState<boolean>(false);
+
+  // Section 12 Interactive Evaluation & Simplified Re-Explanation State
+  const [selectedSection12Answers, setSelectedSection12Answers] = useState<Record<number, number>>({});
+  const [expandedSimplerExpl, setExpandedSimplerExpl] = useState<Record<number, boolean>>({});
+
   const [checkpointAnswers, setCheckpointAnswers] = useState<Record<number, number>>({});
   const [checkpointRevealed, setCheckpointRevealed] = useState<Record<number, boolean>>({});
   const [simParams, setSimParams] = useState<Record<number, number>>({});
@@ -230,16 +601,93 @@ export const AILearningStudioView: React.FC<AILearningStudioViewProps> = ({
     }
   };
 
-  const togglePlayPause = () => {
-    if (!audioRef.current) {
-      setIsPlaying(!isPlaying);
-      return;
+  // Stop voice and audio when tab changes or component unmounts
+  useEffect(() => {
+    if (activeTab !== 'video') {
+      if (audioRef.current && !audioRef.current.paused) {
+        audioRef.current.pause();
+      }
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+      setIsPlaying(false);
     }
+  }, [activeTab]);
+
+  useEffect(() => {
+    return () => {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
+
+  // Sync volume with audio element
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.volume = isMuted ? 0 : volume / 100;
+    }
+    if (isMuted && typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+  }, [volume, isMuted]);
+
+  // Synchronize playback speed
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.playbackRate = playbackSpeed;
+    }
+  }, [playbackSpeed]);
+
+  // Web Speech fallback synthesis for voice narration
+  const speakSceneWithWebSpeech = (sceneIdx: number) => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel();
+    if (isMuted || volume === 0) return;
+
+    const scenes = videoData?.scenes_json || [];
+    const scene = scenes[sceneIdx];
+    const text = scene?.voiceover_text || scene?.title || '';
+    if (!text.trim()) return;
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.volume = isMuted ? 0 : volume / 100;
+    utterance.rate = Math.min(1.5, Math.max(0.7, playbackSpeed));
+
+    const voices = window.speechSynthesis.getVoices();
+    const preferredVoice = voices.find(v =>
+      v.lang.startsWith('en') &&
+      (v.name.includes('Natural') || v.name.includes('Google') || v.name.includes('Neural') || v.name.includes('Samantha') || v.name.includes('David') || v.name.includes('Zira'))
+    ) || voices.find(v => v.lang.startsWith('en'));
+
+    if (preferredVoice) {
+      utterance.voice = preferredVoice;
+    }
+
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const togglePlayPause = () => {
     if (isPlaying) {
-      audioRef.current.pause();
+      if (audioRef.current && !audioRef.current.paused) {
+        audioRef.current.pause();
+      }
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
       setIsPlaying(false);
     } else {
-      audioRef.current.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(true));
+      setIsPlaying(true);
+      if (audioRef.current && resolvedAudioUrl) {
+        audioRef.current.volume = isMuted ? 0 : volume / 100;
+        audioRef.current.playbackRate = playbackSpeed;
+        audioRef.current.play().catch((err) => {
+          console.warn('Audio playback interrupted or blocked, falling back to Web Speech:', err);
+          speakSceneWithWebSpeech(currentSceneIdx);
+        });
+      } else {
+        speakSceneWithWebSpeech(currentSceneIdx);
+      }
     }
   };
 
@@ -254,12 +702,101 @@ export const AILearningStudioView: React.FC<AILearningStudioViewProps> = ({
       targetTime += parseFloat(scenes[i].duration_seconds || 18);
     }
     setPlaybackTime(targetTime);
-    if (audioRef.current) {
+    if (audioRef.current && resolvedAudioUrl) {
       audioRef.current.currentTime = targetTime;
-      if (!isPlaying) {
-        audioRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
+      if (isPlaying) {
+        audioRef.current.play().catch(() => speakSceneWithWebSpeech(idx));
       }
+    } else if (isPlaying) {
+      speakSceneWithWebSpeech(idx);
     }
+  };
+
+  // When scene advances while playing with Web Speech
+  useEffect(() => {
+    if (isPlaying && (!resolvedAudioUrl || !audioRef.current || audioRef.current.paused)) {
+      speakSceneWithWebSpeech(currentSceneIdx);
+    }
+  }, [currentSceneIdx, isPlaying]);
+
+  // 9-Step Journey Navigation
+  const handleStepNavigation = (stepId: number) => {
+    setMasteryStep(stepId);
+    if (stepId === 1 || stepId === 2 || stepId === 4 || stepId === 5 || stepId === 7 || stepId === 9) {
+      setActiveTab('learn');
+    } else if (stepId === 3) {
+      setActiveTab('video');
+    } else if (stepId === 6) {
+      setActiveTab('comprehension');
+    } else if (stepId === 8) {
+      setActiveTab('activities');
+    }
+  };
+
+  // Lesson Text Audio Reader Handler
+  const toggleLessonAudio = () => {
+    if (isLessonAudioPlaying) {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+      setIsLessonAudioPlaying(false);
+    } else {
+      if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+      window.speechSynthesis.cancel();
+
+      const topicIntroText = studioContent?.topic_introduction || topic?.topic_name || '';
+      const simpleExplText = studioContent?.simple_explanation || '';
+      const detailedExplText = studioContent?.detailed_explanation || '';
+      const pts = (studioContent?.points_to_remember || []).join('. ');
+
+      const fullText = `${topicIntroText}. Intuitive concept overview: ${simpleExplText}. In depth theoretical analysis: ${detailedExplText}. High yield summary to remember: ${pts}`;
+
+      const utterance = new SpeechSynthesisUtterance(fullText);
+      utterance.volume = lessonAudioMuted ? 0 : lessonAudioVolume / 100;
+      utterance.rate = Math.min(1.5, Math.max(0.7, lessonAudioSpeed));
+
+      const voices = window.speechSynthesis.getVoices();
+      const preferredVoice = voices.find(v =>
+        v.lang.startsWith('en') &&
+        (v.name.includes('Natural') || v.name.includes('Google') || v.name.includes('Neural') || v.name.includes('Samantha') || v.name.includes('David') || v.name.includes('Zira'))
+      ) || voices.find(v => v.lang.startsWith('en'));
+
+      if (preferredVoice) utterance.voice = preferredVoice;
+
+      utterance.onend = () => {
+        setIsLessonAudioPlaying(false);
+        api.updateTopicInteraction(token!, topicId!, { audio_listened_seconds: 60 });
+      };
+      utterance.onerror = () => setIsLessonAudioPlaying(false);
+
+      window.speechSynthesis.speak(utterance);
+      setIsLessonAudioPlaying(true);
+      showToast('🎙️ Spoken audio lesson started!');
+    }
+  };
+
+  const readSectionAloud = (textToRead: string, label: string = 'Section') => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(textToRead);
+    utterance.volume = lessonAudioMuted ? 0 : lessonAudioVolume / 100;
+    utterance.rate = lessonAudioSpeed;
+
+    const voices = window.speechSynthesis.getVoices();
+    const preferredVoice = voices.find(v =>
+      v.lang.startsWith('en') &&
+      (v.name.includes('Natural') || v.name.includes('Google') || v.name.includes('Neural') || v.name.includes('Samantha') || v.name.includes('David'))
+    ) || voices.find(v => v.lang.startsWith('en'));
+
+    if (preferredVoice) utterance.voice = preferredVoice;
+
+    utterance.onend = () => setIsLessonAudioPlaying(false);
+    utterance.onerror = () => setIsLessonAudioPlaying(false);
+
+    window.speechSynthesis.speak(utterance);
+    setIsLessonAudioPlaying(true);
+    showToast(`🎙️ Reading ${label} aloud...`);
   };
 
   // Synchronize playback timeline when playing without audio or updating time
@@ -554,6 +1091,94 @@ export const AILearningStudioView: React.FC<AILearningStudioViewProps> = ({
         </div>
       </div>
 
+      {/* 9-Step Multimedia Learning Masterclass Stepper */}
+      <div
+        className="card"
+        style={{
+          padding: '16px 20px',
+          borderRadius: '16px',
+          background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(30, 41, 59, 0.95))',
+          border: '1px solid #334155',
+          color: '#E8EEF4',
+          marginBottom: '20px'
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '12.5px', fontWeight: 800, color: '#38BDF8', letterSpacing: '0.04em' }}>
+              🚀 9-STEP SEQUENTIAL MULTIMEDIA LEARNING JOURNEY
+            </span>
+            <span className="pill" style={{ background: 'rgba(56, 189, 248, 0.18)', color: '#38BDF8', fontSize: '11px', fontWeight: 700 }}>
+              Step {masteryStep} of 9
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button
+              onClick={() => handleStepNavigation(Math.max(1, masteryStep - 1))}
+              disabled={masteryStep === 1}
+              className="btn sm"
+              style={{ fontSize: '11px', borderColor: '#334155', color: '#94A3B8' }}
+            >
+              ← Previous Step
+            </button>
+            <button
+              onClick={() => handleStepNavigation(Math.min(9, masteryStep + 1))}
+              disabled={masteryStep === 9}
+              className="btn sm primary"
+              style={{ fontSize: '11px' }}
+            >
+              Next Step →
+            </button>
+          </div>
+        </div>
+
+        {/* Stepper Grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: '8px' }}>
+          {[
+            { id: 1, label: '1. Introduction', icon: '🌟' },
+            { id: 2, label: '2. Explanation', icon: '📖' },
+            { id: 3, label: '3. Video & Avatar', icon: '🎬' },
+            { id: 4, label: '4. Visual Demo', icon: '🔬' },
+            { id: 5, label: '5. Worked Example', icon: '📐' },
+            { id: 6, label: '6. Checkpoint Quiz', icon: '❓' },
+            { id: 7, label: '7. Re-Explanation', icon: '💡' },
+            { id: 8, label: '8. Practice Drills', icon: '🃏' },
+            { id: 9, label: '9. Quick Revision', icon: '⚡' }
+          ].map(st => {
+            const isCurrent = masteryStep === st.id;
+            const isCompleted = masteryStep > st.id || (st.id === 9 && interaction.has_mastered);
+
+            return (
+              <button
+                key={st.id}
+                onClick={() => handleStepNavigation(st.id)}
+                style={{
+                  padding: '8px 10px',
+                  borderRadius: '10px',
+                  border: `1.5px solid ${isCurrent ? '#38BDF8' : isCompleted ? '#10B981' : '#334155'}`,
+                  background: isCurrent ? 'rgba(56, 189, 248, 0.2)' : isCompleted ? 'rgba(16, 185, 129, 0.15)' : '#0F172A',
+                  color: isCurrent ? '#FFFFFF' : isCompleted ? '#34D399' : '#94A3B8',
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  textAlign: 'center',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '3px',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <span style={{ fontSize: '13px' }}>{isCompleted ? '✓' : st.icon}</span>
+                <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>
+                  {st.label}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {/* Topic Learning Flow Navigation Tabs */}
       <div
         style={{
@@ -614,6 +1239,111 @@ export const AILearningStudioView: React.FC<AILearningStudioViewProps> = ({
       {activeTab === 'learn' && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: '24px' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
+            {/* AI Lesson Audio Reader Bar */}
+            <div
+              className="card"
+              style={{
+                padding: '14px 20px',
+                borderRadius: '14px',
+                background: isLessonAudioPlaying ? 'rgba(56, 189, 248, 0.12)' : 'var(--surface-hover)',
+                border: `1.5px solid ${isLessonAudioPlaying ? '#38BDF8' : 'var(--border)'}`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '12px',
+                boxShadow: isLessonAudioPlaying ? '0 4px 20px rgba(56, 189, 248, 0.2)' : 'none',
+                transition: 'all 0.2s ease'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <button
+                  onClick={toggleLessonAudio}
+                  className="btn primary"
+                  style={{
+                    width: '38px',
+                    height: '38px',
+                    borderRadius: '50%',
+                    padding: 0,
+                    display: 'grid',
+                    placeItems: 'center'
+                  }}
+                  title={isLessonAudioPlaying ? 'Pause Audio Narration' : 'Listen to Full Lesson Audio'}
+                >
+                  <Icon name={isLessonAudioPlaying ? 'pause' : 'play'} size={16} />
+                </button>
+
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontSize: '13px', fontWeight: 800, color: 'var(--text)' }}>
+                      🎙️ AI Lesson Audio Narration
+                    </span>
+                    <span className="pill good" style={{ fontSize: '10px', padding: '1px 6px' }}>
+                      {isLessonAudioPlaying ? 'Playing' : 'Ready'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--muted)', marginTop: '2px' }}>
+                    Listen to full spoken lesson explanation with synchronized speech
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                {/* Speed Selector */}
+                <select
+                  value={lessonAudioSpeed}
+                  onChange={(e) => setLessonAudioSpeed(parseFloat(e.target.value))}
+                  style={{ height: '30px', fontSize: '11px', padding: '0 6px', borderRadius: '6px', background: 'var(--surface2)', borderColor: 'var(--border)', color: 'var(--text)' }}
+                >
+                  <option value="1.0">1.0x Speed</option>
+                  <option value="1.25">1.25x Speed</option>
+                  <option value="1.5">1.5x Speed</option>
+                </select>
+
+                {/* Volume Slider */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <button
+                    onClick={() => setLessonAudioMuted(!lessonAudioMuted)}
+                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: lessonAudioMuted ? '#EF4444' : 'var(--primary)', padding: 0 }}
+                    title={lessonAudioMuted ? 'Unmute' : 'Mute'}
+                  >
+                    <Icon name={lessonAudioMuted ? 'volume-x' : 'volume-2'} size={15} />
+                  </button>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={lessonAudioMuted ? 0 : lessonAudioVolume}
+                    onChange={(e) => {
+                      const v = parseInt(e.target.value);
+                      setLessonAudioVolume(v);
+                      if (lessonAudioMuted && v > 0) setLessonAudioMuted(false);
+                    }}
+                    style={{ width: '60px', accentColor: 'var(--primary)', height: '4px' }}
+                  />
+                </div>
+
+                {/* Soundwave Bars */}
+                {isLessonAudioPlaying && !lessonAudioMuted && (
+                  <div style={{ display: 'flex', alignItems: 'flex-end', gap: '2px', height: '16px' }}>
+                    {[10, 16, 8, 14, 18, 12].map((h, i) => (
+                      <span
+                        key={i}
+                        style={{
+                          width: '3px',
+                          height: `${h}px`,
+                          background: 'var(--primary)',
+                          borderRadius: '2px',
+                          animation: 'pulse 1s infinite alternate',
+                          animationDelay: `${i * 0.15}s`
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
             {/* 1 & 2: Topic Introduction & Learning Objectives */}
             <div className="card" style={{ padding: '24px', borderRadius: '16px', border: '1px solid var(--border)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
@@ -833,7 +1563,7 @@ export const AILearningStudioView: React.FC<AILearningStudioViewProps> = ({
                       border: '1px solid #263648',
                       boxShadow: '0 4px 20px rgba(0, 0, 0, 0.25)'
                     }}
-                    dangerouslySetInnerHTML={{ __html: formatDiagramSvg(diagramsVisuals.diagram_svg, topic.topic_name) }}
+                    dangerouslySetInnerHTML={{ __html: formatDiagramSvg(diagramsVisuals.diagram_svg, topic.topic_name, topic.subject_name) }}
                   />
                 )}
                 {diagramsVisuals.ascii_art && !diagramsVisuals.diagram_svg && (
@@ -893,22 +1623,141 @@ export const AILearningStudioView: React.FC<AILearningStudioViewProps> = ({
                           Q{qIdx + 1}: {q.question}
                         </div>
                         {q.options && q.options.length > 0 && (
-                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '8px', marginBottom: '12px' }}>
-                            {q.options.map((opt: string, optIdx: number) => (
-                              <div
-                                key={optIdx}
-                                style={{
-                                  padding: '8px 12px',
-                                  borderRadius: '8px',
-                                  background: 'var(--bg)',
-                                  border: '1px solid var(--border)',
-                                  fontSize: '13px'
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px', marginBottom: '14px' }}>
+                            {q.options.map((opt: string, optIdx: number) => {
+                              const isSelected = selectedSection12Answers[qIdx] === optIdx;
+                              const hasAnswered = selectedSection12Answers[qIdx] !== undefined;
+                              const isCorrect = optIdx === q.correct_idx;
+
+                              let borderColor = 'var(--border)';
+                              let bgColor = 'var(--bg)';
+                              let textColor = 'var(--text)';
+
+                              if (hasAnswered) {
+                                if (isCorrect) {
+                                  borderColor = '#10B981';
+                                  bgColor = 'rgba(16, 185, 129, 0.15)';
+                                  textColor = '#10B981';
+                                } else if (isSelected && !isCorrect) {
+                                  borderColor = '#EF4444';
+                                  bgColor = 'rgba(239, 68, 68, 0.15)';
+                                  textColor = '#EF4444';
+                                }
+                              }
+
+                              return (
+                                <button
+                                  key={optIdx}
+                                  onClick={() => {
+                                    if (hasAnswered) return;
+                                    setSelectedSection12Answers(prev => ({ ...prev, [qIdx]: optIdx }));
+                                    if (optIdx !== q.correct_idx) {
+                                      setExpandedSimplerExpl(prev => ({ ...prev, [qIdx]: true }));
+                                      api.updateTopicInteraction(token!, topicId!, { incorrect_answers_count: 1 });
+                                      showToast('Incorrect. Review the simplified explanation below!');
+                                    } else {
+                                      showToast('✓ Correct! Outstanding understanding.');
+                                      api.updateTopicInteraction(token!, topicId!, { comprehension_score: 90 });
+                                    }
+                                  }}
+                                  disabled={hasAnswered}
+                                  style={{
+                                    padding: '12px 14px',
+                                    borderRadius: '10px',
+                                    background: bgColor,
+                                    border: `1.5px solid ${borderColor}`,
+                                    color: textColor,
+                                    fontSize: '13px',
+                                    fontWeight: 600,
+                                    textAlign: 'left',
+                                    cursor: hasAnswered ? 'default' : 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '10px',
+                                    transition: 'all 0.15s ease'
+                                  }}
+                                >
+                                  <span style={{
+                                    width: '24px',
+                                    height: '24px',
+                                    borderRadius: '50%',
+                                    background: hasAnswered && isCorrect ? '#10B981' : hasAnswered && isSelected ? '#EF4444' : 'var(--surface2)',
+                                    color: hasAnswered && (isCorrect || isSelected) ? '#FFFFFF' : 'var(--text)',
+                                    display: 'grid',
+                                    placeItems: 'center',
+                                    fontSize: '12px',
+                                    fontWeight: 700,
+                                    flexShrink: 0
+                                  }}>
+                                    {hasAnswered && isCorrect ? '✓' : hasAnswered && isSelected ? '✗' : String.fromCharCode(65 + optIdx)}
+                                  </span>
+                                  <span style={{ flex: 1 }}>{opt}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {/* Immediate Feedback & Simplified Re-Explanation Accordion on Incorrect Choice */}
+                        {selectedSection12Answers[qIdx] !== undefined && selectedSection12Answers[qIdx] !== q.correct_idx && (
+                          <div style={{
+                            marginBottom: '14px',
+                            padding: '14px 18px',
+                            background: 'rgba(239, 68, 68, 0.08)',
+                            borderRadius: '12px',
+                            border: '1.5px solid rgba(239, 68, 68, 0.35)',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '10px'
+                          }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#EF4444', fontWeight: 700, fontSize: '13px' }}>
+                              <span>✗ Incorrect. Correct Choice is Option {String.fromCharCode(65 + q.correct_idx)}:</span>
+                            </div>
+
+                            <div style={{ fontSize: '13px', color: 'var(--text)', lineHeight: 1.55 }}>
+                              {q.solution}
+                            </div>
+
+                            <div style={{
+                              background: 'rgba(245, 158, 11, 0.12)',
+                              border: '1px solid rgba(245, 158, 11, 0.35)',
+                              borderRadius: '10px',
+                              padding: '12px 14px',
+                              color: '#F59E0B'
+                            }}>
+                              <div style={{ fontWeight: 800, fontSize: '12.5px', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                                <span>💡 Simplified Re-Explanation & Everyday Analogy:</span>
+                              </div>
+                              <div style={{ fontSize: '13px', color: 'var(--text)', lineHeight: 1.55 }}>
+                                {q.simplified_re_explanation || simpleExpl || `Think of ${topic.topic_name} like an automated safety valve: when inputs exceed threshold, it activates deterministic rules to ensure system invariants and stability.`}
+                              </div>
+                            </div>
+
+                            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                              <button
+                                className="btn sm"
+                                style={{ fontSize: '11px', borderColor: 'var(--line)' }}
+                                onClick={() => {
+                                  setActiveTab('tutor');
+                                  handleSendChatMessage(`I got this practice question wrong on ${topic.topic_name}: "${q.question}". Can you explain why "${q.options[q.correct_idx]}" is the right answer using a simpler everyday analogy?`);
                                 }}
                               >
-                                <span style={{ fontWeight: 700, marginRight: '6px' }}>{String.fromCharCode(65 + optIdx)}.</span>
-                                {opt}
-                              </div>
-                            ))}
+                                💬 Ask AI Tutor for Simpler Breakdown
+                              </button>
+                              <button
+                                className="btn sm"
+                                style={{ fontSize: '11px', borderColor: 'var(--line)' }}
+                                onClick={() => {
+                                  setSelectedSection12Answers(prev => {
+                                    const next = { ...prev };
+                                    delete next[qIdx];
+                                    return next;
+                                  });
+                                }}
+                              >
+                                🔁 Try Answering Again
+                              </button>
+                            </div>
                           </div>
                         )}
                         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -1043,689 +1892,1133 @@ export const AILearningStudioView: React.FC<AILearningStudioViewProps> = ({
         </div>
       )}
 
-      {/* TAB: ANIMATED EDUCATIONAL VIDEO & VISUALS */}
+      {/* TAB: ANIMATED EDUCATIONAL VIDEO & VISUALS (YOUTUBE MASTERCLASS THEATER) */}
       {activeTab === 'video' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          {/* Video Header Card */}
-          <div className="card" style={{ padding: '18px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '14px' }}>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                <span className="pill primary" style={{ fontSize: '11px', fontWeight: 700 }}>
-                  🎬 {videoData?.engine ? videoData.engine.toUpperCase() : videoEngine.toUpperCase()} VIDEO
-                </span>
-                <span className="pill" style={{ fontSize: '11px' }}>
-                  ⏱ {videoData?.duration_seconds ? `${Math.round(videoData.duration_seconds)}s` : '90s'}
-                </span>
-                {videoData?.status === 'completed' && (
-                  <span className="pill good" style={{ fontSize: '11px' }}>✓ Audio Synced</span>
-                )}
-              </div>
-              <h2 style={{ fontSize: '20px', fontWeight: 800, margin: 0 }}>
-                {videoData?.title || `Visual Masterclass: ${topic.topic_name}`}
-              </h2>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
+          {/* Top Masterclass Action & Setting Strip */}
+          <div
+            className="card"
+            style={{
+              padding: '16px 22px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: '14px',
+              background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.9) 0%, rgba(20, 30, 48, 0.9) 100%)',
+              border: '1px solid rgba(84, 194, 240, 0.25)',
+              borderRadius: '16px'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <span
+                style={{
+                  background: 'linear-gradient(135deg, #EF4444 0%, #DC2626 100%)',
+                  color: '#FFFFFF',
+                  padding: '4px 12px',
+                  borderRadius: '6px',
+                  fontSize: '11px',
+                  fontWeight: 800,
+                  letterSpacing: '0.06em',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px'
+                }}
+              >
+                <span>▶</span> YOUTUBE MASTERCLASS
+              </span>
+
+              <span className="pill" style={{ fontSize: '11px', background: 'rgba(56, 189, 248, 0.15)', color: '#38BDF8', borderColor: 'rgba(56, 189, 248, 0.3)' }}>
+                🎬 1080p 60fps HD
+              </span>
+
+              <span className="pill" style={{ fontSize: '11px', background: 'rgba(16, 185, 129, 0.15)', color: '#34D399', borderColor: 'rgba(16, 185, 129, 0.3)' }}>
+                🎙️ AI Neural Voice Synced
+              </span>
+
+              <span className="pill" style={{ fontSize: '11px' }}>
+                ⏱ {videoData?.duration_seconds ? `${Math.round(videoData.duration_seconds)}s` : '160s'} Total
+              </span>
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
               <select
                 value={videoEngine}
                 onChange={(e) => setVideoEngine(e.target.value as any)}
-                style={{ height: '34px', fontSize: '12px', padding: '0 10px', borderRadius: '8px', background: 'var(--surface2)', borderColor: 'var(--line)', color: 'var(--ink)' }}
+                style={{ height: '34px', fontSize: '12px', padding: '0 10px', borderRadius: '8px', background: 'rgba(15, 23, 42, 0.8)', borderColor: 'rgba(84, 194, 240, 0.3)', color: '#E8EEF4' }}
               >
-                <option value="remotion">Remotion Animated Slides</option>
+                <option value="remotion">Remotion Dynamic Slides</option>
                 <option value="manim">Manim Mathematical Engine</option>
                 <option value="hybrid">Hybrid (Remotion + Manim)</option>
               </select>
+
+              {/* AI Avatar Instructor Controls */}
+              <button
+                className="btn sm"
+                onClick={() => setShowAvatar(!showAvatar)}
+                style={{
+                  background: showAvatar ? 'rgba(84, 194, 240, 0.18)' : 'transparent',
+                  borderColor: showAvatar ? '#54C2F0' : 'rgba(255, 255, 255, 0.15)',
+                  color: showAvatar ? '#54C2F0' : '#94A3B8',
+                  fontSize: '12px',
+                  fontWeight: 600
+                }}
+                title="Toggle AI Talking Avatar Instructor"
+              >
+                🤖 Avatar {showAvatar ? 'ON' : 'OFF'}
+              </button>
+
+              {showAvatar && (
+                <select
+                  value={avatarPersona}
+                  onChange={(e) => setAvatarPersona(e.target.value as AvatarPersona)}
+                  style={{ height: '34px', fontSize: '11.5px', padding: '0 8px', borderRadius: '8px', background: 'rgba(15, 23, 42, 0.8)', borderColor: 'rgba(84, 194, 240, 0.3)', color: '#E8EEF4' }}
+                  title="Choose AI Instructor Persona"
+                >
+                  <option value="scholar">🎓 Dr. Alex (Professor)</option>
+                  <option value="hologram">⚡ Nova (Holo AI)</option>
+                  <option value="friendly">🌟 Maya (Peer Mentor)</option>
+                  <option value="bot">🤖 PilotBot (Android)</option>
+                </select>
+              )}
 
               <button
                 className="btn sm"
                 onClick={handleRegenerateVideo}
                 disabled={videoLoading}
-                title="Regenerate educational video script, narration, and scenes"
+                style={{ background: 'rgba(56, 189, 248, 0.12)', borderColor: 'rgba(56, 189, 248, 0.35)', color: '#38BDF8' }}
+                title="Regenerate video script, narration, and scenes"
               >
                 <Icon name="refresh" size={14} className={videoLoading ? 'animate-spin' : ''} />
-                {videoLoading ? 'Generating...' : 'Regenerate Video'}
+                {videoLoading ? 'Generating...' : 'Regenerate'}
               </button>
             </div>
           </div>
 
           {/* Main Video Theater Player */}
           {videoLoading ? (
-            <div className="card" style={{ padding: '80px 24px', textAlign: 'center', background: '#0C131B', color: '#E8EEF4', borderRadius: '18px', border: '1px solid #263648' }}>
-              <Icon name="sparkles" size={42} style={{ color: '#54C2F0', margin: '0 auto 16px' }} />
-              <h3 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '8px' }}>
-                Synthesizing Educational Video & Voice Narration...
+            <div className="card" style={{ padding: '80px 24px', textAlign: 'center', background: '#070B14', color: '#E8EEF4', borderRadius: '20px', border: '1px solid #263648' }}>
+              <Icon name="sparkles" size={44} style={{ color: '#54C2F0', margin: '0 auto 16px' }} />
+              <h3 style={{ fontSize: '20px', fontWeight: 800, marginBottom: '8px' }}>
+                Rendering YouTube Masterclass Video & Synthesizing Voice...
               </h3>
-              <p style={{ color: '#92A3B5', fontSize: '13px', maxWidth: '460px', margin: '0 auto' }}>
-                Dividing syllabus lesson into visual scenes, compiling mathematical animations, and synchronizing offline voiceover audio.
+              <p style={{ color: '#92A3B5', fontSize: '13.5px', maxWidth: '480px', margin: '0 auto' }}>
+                Structuring 11 progressive chapters from Basic to Advanced, generating dynamic archetype animations, and aligning synchronized speech closed-captions.
               </p>
             </div>
           ) : !videoData ? (
-            <div className="card" style={{ padding: '60px 24px', textAlign: 'center', borderRadius: '18px', border: '1px dashed var(--line)' }}>
-              <Icon name="play" size={48} style={{ color: 'var(--accent)', margin: '0 auto 16px' }} />
-              <h3 style={{ fontSize: '20px', fontWeight: 800, marginBottom: '8px' }}>
+            <div className="card" style={{ padding: '70px 24px', textAlign: 'center', borderRadius: '20px', border: '1px dashed var(--line)', background: '#070B14' }}>
+              <Icon name="play" size={52} style={{ color: '#EF4444', margin: '0 auto 16px' }} />
+              <h3 style={{ fontSize: '22px', fontWeight: 800, marginBottom: '8px', color: '#FFFFFF' }}>
                 No Video Generated Yet for {topic.topic_name}
               </h3>
-              <p style={{ color: 'var(--muted)', fontSize: '14px', maxWidth: '480px', margin: '0 auto 20px' }}>
-                StudyPilot AI can automatically build an animated visual masterclass complete with scene slides, formulas, voiceover narration, and synchronized subtitles.
+              <p style={{ color: '#94A3B8', fontSize: '14px', maxWidth: '500px', margin: '0 auto 24px' }}>
+                Generate a professional YouTube-style visual masterclass complete with 11 structured teaching chapters, animated concept diagrams, voice narration, and synchronized subtitles.
               </p>
               <button
                 className="btn primary"
                 onClick={() => handleGenerateVideo(videoEngine)}
-                style={{ fontSize: '14px', padding: '0 20px' }}
+                style={{ fontSize: '14px', padding: '12px 24px', background: 'linear-gradient(135deg, #EF4444 0%, #DC2626 100%)', border: 'none', boxShadow: '0 4px 18px rgba(239, 68, 68, 0.4)' }}
               >
-                <Icon name="sparkles" size={16} /> Generate Animated Educational Video
+                <Icon name="sparkles" size={16} /> Generate YouTube Masterclass Video
               </button>
             </div>
           ) : (
-            <div
-              className="card"
-              style={{
-                background: '#0C131B',
-                color: '#E8EEF4',
-                borderRadius: '18px',
-                border: '1px solid #263648',
-                padding: '24px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '20px',
-                boxShadow: '0 12px 36px rgba(0, 0, 0, 0.45)'
-              }}
-            >
-              {/* 1. Basic to Advanced Progressive Level Stepper */}
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                  <div style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#54C2F0', fontWeight: 800 }}>
-                    🚀 Progressive Learning Path: Basic ➔ Foundation ➔ Intermediate ➔ Advanced ➔ Mastery
-                  </div>
-                  <div style={{ fontSize: '11px', color: '#92A3B5' }}>
-                    Stage {currentSceneIdx + 1} of {(videoData.scenes_json || []).length}
-                  </div>
-                </div>
+            (() => {
+              const scenes = videoData.scenes_json || [];
+              const currentScene = scenes[currentSceneIdx] || scenes[0] || {};
+              const slide = currentScene.slide_content || {};
+              const totalDuration = videoData.duration_seconds || 160;
+              const progressPct = totalDuration > 0 ? Math.min(100, Math.max(0, (playbackTime / totalDuration) * 100)) : 0;
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px' }}>
-                  {(videoData.scenes_json || []).map((sc: any, idx: number) => {
-                    const isActive = currentSceneIdx === idx;
-                    const isPassed = checkpointRevealed[idx] && checkpointAnswers[idx] === (sc.checkpoint_quiz?.correct_index ?? 0);
-                    const stageColors = ['#4CC98A', '#54C2F0', '#B073F0', '#F08C3C', '#F0C83C'];
-                    const stageColor = stageColors[idx % stageColors.length];
-
-                    return (
-                      <button
-                        key={sc.id || idx}
-                        onClick={() => jumpToScene(idx)}
-                        style={{
-                          display: 'flex',
-                          flexDirection: 'column',
-                          alignItems: 'flex-start',
-                          gap: '4px',
-                          padding: '10px 14px',
-                          borderRadius: '12px',
-                          border: '1.5px solid',
-                          borderColor: isActive ? stageColor : '#263648',
-                          background: isActive ? `${stageColor}1A` : '#141E2A',
-                          cursor: 'pointer',
-                          textAlign: 'left',
-                          transition: 'all 0.15s ease'
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                          <span style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.08em', color: stageColor, fontWeight: 800 }}>
-                            {sc.level_key ? `Stage ${idx + 1}` : `Scene ${idx + 1}`}
-                          </span>
-                          {isPassed && (
-                            <span style={{ fontSize: '10px', background: 'rgba(76, 201, 138, 0.2)', color: '#4CC98A', padding: '1px 6px', borderRadius: '4px', fontWeight: 700 }}>
-                              ✓ Mastered
-                            </span>
-                          )}
-                        </div>
-                        <div style={{ fontSize: '12px', fontWeight: 700, color: isActive ? '#FFFFFF' : '#C4D3E0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>
-                          {sc.level_badge || sc.title}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* 2. Pedagogical Goal & Mode Toggles */}
-              {(() => {
-                const scenes = videoData.scenes_json || [];
-                const currentScene = scenes[currentSceneIdx] || scenes[0] || {};
-                const slide = currentScene.slide_content || {};
-
-                return (
-                  <>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', padding: '10px 16px', background: '#141E2A', borderRadius: '12px', border: '1px solid #263648' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
-                        <span style={{ color: '#54C2F0', fontWeight: 700 }}>🎯 Pedagogical Goal:</span>
-                        <span style={{ color: '#E8EEF4' }}>{currentScene.pedagogical_goal || 'Step-by-step conceptual mastery'}</span>
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                  
+                  {/* ========================================================================= */}
+                  {/* 1. CINEMATIC 16:9 YOUTUBE VIDEO CANVAS                                    */}
+                  {/* ========================================================================= */}
+                  <div
+                    onMouseEnter={() => setVideoHover(true)}
+                    onMouseLeave={() => setVideoHover(false)}
+                    style={{
+                      position: isFullscreen ? 'fixed' : 'relative',
+                      inset: isFullscreen ? '0' : undefined,
+                      zIndex: isFullscreen ? 9999 : 1,
+                      width: '100%',
+                      aspectRatio: isFullscreen ? undefined : '16 / 9',
+                      minHeight: isFullscreen ? '100vh' : '420px',
+                      maxHeight: isFullscreen ? '100vh' : '560px',
+                      background: '#070B14',
+                      borderRadius: isFullscreen ? '0' : '22px',
+                      overflow: 'hidden',
+                      boxShadow: '0 24px 60px -15px rgba(0, 0, 0, 0.8), 0 0 50px -10px rgba(56, 189, 248, 0.25)',
+                      border: '1px solid rgba(84, 194, 240, 0.25)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between',
+                      userSelect: 'none'
+                    }}
+                  >
+                    {/* Top HUD Overlay (Fades on hover or pause) */}
+                    <div
+                      style={{
+                        padding: '18px 24px',
+                        background: 'linear-gradient(180deg, rgba(7, 11, 20, 0.95) 0%, rgba(7, 11, 20, 0) 100%)',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        zIndex: 10,
+                        opacity: videoHover || !isPlaying ? 1 : 0.85,
+                        transition: 'opacity 0.2s ease'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <span
+                          style={{
+                            background: 'rgba(56, 189, 248, 0.18)',
+                            color: '#38BDF8',
+                            border: '1px solid rgba(56, 189, 248, 0.4)',
+                            padding: '3px 10px',
+                            borderRadius: '999px',
+                            fontSize: '11px',
+                            fontWeight: 800,
+                            letterSpacing: '0.06em'
+                          }}
+                        >
+                          CHAPTER {currentSceneIdx + 1} OF {scenes.length}
+                        </span>
+                        <span style={{ fontSize: '13.5px', fontWeight: 700, color: '#FFFFFF' }}>
+                          {currentScene.level_badge || currentScene.title}
+                        </span>
                       </div>
+
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        {currentScene.analogy && (
+                        <span style={{ fontSize: '11px', color: '#94A3B8', background: 'rgba(15, 23, 42, 0.8)', padding: '2px 8px', borderRadius: '4px', border: '1px solid rgba(255, 255, 255, 0.1)' }}>
+                          1080p HD
+                        </span>
+                        {isFullscreen && (
                           <button
-                            onClick={() => setShowAnalogyMode(!showAnalogyMode)}
+                            onClick={() => setIsFullscreen(false)}
                             className="btn sm"
-                            style={{
-                              background: showAnalogyMode ? 'rgba(240, 178, 60, 0.25)' : 'transparent',
-                              borderColor: showAnalogyMode ? '#F0B23C' : '#263648',
-                              color: showAnalogyMode ? '#F0B23C' : '#92A3B5',
-                              fontSize: '11px',
-                              fontWeight: 700
-                            }}
-                            title="Toggle everyday analogy explanation"
+                            style={{ background: 'rgba(0,0,0,0.6)', color: '#FFFFFF', padding: '4px 8px' }}
                           >
-                            💡 {showAnalogyMode ? 'Everyday Analogy (Active)' : 'Everyday Analogy'}
+                            Exit Fullscreen
                           </button>
                         )}
-                        <button
-                          onClick={() => setShowTranscript(!showTranscript)}
-                          className="btn sm"
-                          style={{
-                            background: showTranscript ? 'rgba(84, 194, 240, 0.2)' : 'transparent',
-                            borderColor: showTranscript ? '#54C2F0' : '#263648',
-                            color: showTranscript ? '#54C2F0' : '#92A3B5',
-                            fontSize: '11px',
-                            fontWeight: 700
-                          }}
-                          title="View interactive sentence transcript"
-                        >
-                          📜 {showTranscript ? 'Hide Transcript' : 'Transcript'}
-                        </button>
                       </div>
                     </div>
 
-                    {/* Everyday Analogy Banner */}
-                    {showAnalogyMode && currentScene.analogy && (
-                      <div style={{ padding: '12px 18px', background: 'rgba(240, 178, 60, 0.1)', border: '1px solid rgba(240, 178, 60, 0.35)', borderRadius: '12px', color: '#F8DF9E', fontSize: '13.5px', lineHeight: 1.55 }}>
-                        <strong style={{ color: '#F0B23C', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
-                          💡 Beginner Intuition & Everyday Analogy:
-                        </strong>
-                        {currentScene.analogy}
-                      </div>
-                    )}
-
-                    {/* 3. Theater Canvas (16:9 Presentation Frame) */}
+                    {/* Center Video Stage: Animated Concepts & Diagrams */}
                     <div
+                      onClick={togglePlayPause}
                       style={{
-                        background: '#141E2A',
-                        borderRadius: '14px',
-                        border: '1px solid #263648',
-                        padding: '30px',
-                        minHeight: '380px',
-                        display: 'grid',
-                        gridTemplateColumns: 'minmax(0, 1.2fr) minmax(0, 1fr)',
-                        gap: '28px',
-                        alignItems: 'center',
+                        flex: 1,
                         position: 'relative',
-                        overflow: 'hidden'
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: '16px 28px',
+                        cursor: 'pointer'
                       }}
                     >
-                      {/* Visual glow */}
+                      {/* Ambient Concept Glow */}
                       <div
                         style={{
                           position: 'absolute',
-                          top: '-80px',
-                          right: '-80px',
-                          width: '260px',
-                          height: '260px',
+                          width: '400px',
+                          height: '240px',
                           borderRadius: '50%',
-                          background: 'radial-gradient(circle, rgba(84, 194, 240, 0.12) 0%, transparent 70%)',
+                          background: 'radial-gradient(circle, rgba(56, 189, 248, 0.14) 0%, transparent 70%)',
                           pointerEvents: 'none'
                         }}
                       />
 
-                      {/* Left Pane: Slide Content */}
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#54C2F0', fontWeight: 800 }}>
-                            {currentScene.level_badge || `Scene ${currentSceneIdx + 1} of ${scenes.length}`}
+                      {/* Main Animated Concept Diagram Canvas */}
+                      <div
+                        style={{
+                          width: '100%',
+                          maxWidth: '780px',
+                          background: 'rgba(15, 23, 42, 0.75)',
+                          backdropFilter: 'blur(8px)',
+                          borderRadius: '16px',
+                          border: '1.5px solid rgba(56, 189, 248, 0.3)',
+                          padding: '18px 22px',
+                          boxShadow: '0 12px 36px rgba(0, 0, 0, 0.45)',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          gap: '12px',
+                          position: 'relative',
+                          zIndex: 2
+                        }}
+                      >
+                        {/* Slide Title Bar */}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                          <span style={{ fontSize: '11px', color: '#38BDF8', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+                            ✦ {slide.heading || currentScene.title}
+                          </span>
+                          <span style={{ fontSize: '11px', color: '#94A3B8' }}>
+                            {slide.subheading || 'Animated Concept Simulation'}
                           </span>
                         </div>
 
-                        <h1 style={{ fontSize: '24px', fontWeight: 800, color: '#E8EEF4', lineHeight: 1.25, margin: 0 }}>
-                          {slide.heading || currentScene.title}
-                        </h1>
+                        {/* Animated Archetype SVG Container */}
+                        <div
+                          style={{
+                            width: '100%',
+                            minHeight: '170px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            overflow: 'hidden'
+                          }}
+                          dangerouslySetInnerHTML={{
+                            __html: formatDiagramSvg(slide.diagram_svg, topic.topic_name, topic.subject_name)
+                          }}
+                        />
 
-                        {slide.subheading && (
-                          <div style={{ fontSize: '14px', color: '#92A3B5', fontWeight: 500 }}>
-                            {slide.subheading}
+                        {/* Interactive Diagram Hotspots underneath diagram */}
+                        {currentScene.hotspots && currentScene.hotspots.length > 0 && (
+                          <div
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                              display: 'flex',
+                              gap: '8px',
+                              flexWrap: 'wrap',
+                              justifyContent: 'center',
+                              width: '100%',
+                              paddingTop: '6px',
+                              borderTop: '1px solid rgba(255, 255, 255, 0.08)'
+                            }}
+                          >
+                            {currentScene.hotspots.map((h: any) => {
+                              const isSpotActive = activeHotspot === h.id;
+                              return (
+                                <button
+                                  key={h.id}
+                                  onClick={() => setActiveHotspot(isSpotActive ? null : h.id)}
+                                  style={{
+                                    padding: '4px 10px',
+                                    borderRadius: '6px',
+                                    fontSize: '11px',
+                                    border: isSpotActive ? '1px solid #38BDF8' : '1px solid rgba(255, 255, 255, 0.15)',
+                                    background: isSpotActive ? 'rgba(56, 189, 248, 0.25)' : 'rgba(15, 23, 42, 0.8)',
+                                    color: isSpotActive ? '#FFFFFF' : '#94A3B8',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.15s ease'
+                                  }}
+                                >
+                                  <span style={{ color: '#38BDF8', fontWeight: 800, marginRight: '4px' }}>[{h.badge || '✦'}]</span>
+                                  {h.title}
+                                </button>
+                              );
+                            })}
                           </div>
                         )}
 
-                        {/* Bullet points */}
+                        {activeHotspot && (() => {
+                          const spot = currentScene.hotspots.find((h: any) => h.id === activeHotspot);
+                          if (!spot) return null;
+                          return (
+                            <div
+                              onClick={(e) => e.stopPropagation()}
+                              style={{
+                                width: '100%',
+                                padding: '8px 12px',
+                                background: 'rgba(56, 189, 248, 0.12)',
+                                borderRadius: '8px',
+                                border: '1px solid #38BDF8',
+                                fontSize: '12px',
+                                color: '#FFFFFF',
+                                textAlign: 'left'
+                              }}
+                            >
+                              <strong style={{ color: '#38BDF8' }}>{spot.title}:</strong> {spot.desc}
+                            </div>
+                          );
+                        })()}
+                      </div>
+
+                      {/* Big Center Play / Pause Indicator */}
+                      {(!isPlaying || videoHover) && (
+                        <div
+                          style={{
+                            position: 'absolute',
+                            width: '64px',
+                            height: '64px',
+                            borderRadius: '50%',
+                            background: isPlaying ? 'rgba(15, 23, 42, 0.85)' : 'rgba(239, 68, 68, 0.95)',
+                            color: '#FFFFFF',
+                            display: 'grid',
+                            placeItems: 'center',
+                            boxShadow: isPlaying ? '0 8px 24px rgba(0,0,0,0.5)' : '0 8px 30px rgba(239, 68, 68, 0.55)',
+                            border: '2px solid rgba(255, 255, 255, 0.3)',
+                            zIndex: 5,
+                            pointerEvents: 'none',
+                            transform: 'scale(1)',
+                            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
+                          }}
+                        >
+                          <Icon name={isPlaying ? 'pause' : 'play'} size={24} style={{ marginLeft: isPlaying ? '0' : '3px' }} />
+                        </div>
+                      )}
+
+                      {/* Corner Picture-in-Picture AI Avatar Instructor */}
+                      {showAvatar && (
+                        <div
+                          onClick={(e) => e.stopPropagation()}
+                          style={{
+                            position: 'absolute',
+                            bottom: '16px',
+                            right: '20px',
+                            zIndex: 8
+                          }}
+                        >
+                          <AIAvatarInstructor
+                            isSpeaking={isPlaying}
+                            isMuted={isMuted}
+                            volume={volume}
+                            stageIdx={currentSceneIdx}
+                            persona={avatarPersona}
+                            onPersonaChange={setAvatarPersona}
+                            layout="pip"
+                            onLayoutChange={setAvatarLayout}
+                            voiceoverText={(() => {
+                              const subs = videoData.subtitles_json || [];
+                              const matchingSub = subs.find((s: any) => playbackTime >= s.start && playbackTime <= s.end);
+                              return matchingSub ? matchingSub.text : currentScene.voiceover_text;
+                            })()}
+                            topicName={topic.topic_name}
+                          />
+                        </div>
+                      )}
+
+                      {/* YouTube Closed Captions (CC) Overlay */}
+                      {showCaptions && (
+                        <div
+                          onClick={(e) => e.stopPropagation()}
+                          style={{
+                            position: 'absolute',
+                            bottom: '16px',
+                            left: '50%',
+                            transform: 'translateX(-50%)',
+                            maxWidth: '75%',
+                            background: 'rgba(0, 0, 0, 0.88)',
+                            backdropFilter: 'blur(8px)',
+                            border: '1px solid rgba(56, 189, 248, 0.35)',
+                            borderRadius: '8px',
+                            padding: '8px 18px',
+                            textAlign: 'center',
+                            fontSize: '13.5px',
+                            color: '#FFFFFF',
+                            fontWeight: 600,
+                            lineHeight: 1.45,
+                            boxShadow: '0 6px 20px rgba(0, 0, 0, 0.5)',
+                            zIndex: 7
+                          }}
+                        >
+                          {(() => {
+                            const subs = videoData.subtitles_json || [];
+                            const matchingSub = subs.find((s: any) => playbackTime >= s.start && playbackTime <= s.end);
+                            const captionText = matchingSub ? matchingSub.text : (currentScene.voiceover_text || 'Playing visual educational masterclass...');
+                            return (
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                                <span style={{ color: '#38BDF8', fontSize: '11px', fontWeight: 800 }}>CC</span>
+                                <span>“{captionText}”</span>
+                              </span>
+                            );
+                          })()}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* YouTube Bottom Player Controls Bar & Seekbar */}
+                    <div
+                      style={{
+                        background: 'linear-gradient(0deg, rgba(7, 11, 20, 0.98) 0%, rgba(7, 11, 20, 0.85) 60%, rgba(7, 11, 20, 0) 100%)',
+                        padding: '12px 20px 14px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '8px',
+                        zIndex: 10
+                      }}
+                    >
+                      {/* Scrubbing Timeline Bar with 11 Chapter Notches */}
+                      <div style={{ position: 'relative', width: '100%', height: '8px', display: 'flex', alignItems: 'center' }}>
+                        {/* Background Track */}
+                        <div style={{ width: '100%', height: '5px', background: 'rgba(255, 255, 255, 0.2)', borderRadius: '999px', position: 'relative', overflow: 'hidden' }}>
+                          {/* Watched Progress Red Line */}
+                          <div
+                            style={{
+                              width: `${progressPct}%`,
+                              height: '100%',
+                              background: '#EF4444',
+                              borderRadius: '999px',
+                              transition: 'width 0.1s linear'
+                            }}
+                          />
+                        </div>
+
+                        {/* Interactive Range Input Overlay */}
+                        <input
+                          type="range"
+                          min="0"
+                          max={totalDuration}
+                          step="0.5"
+                          value={playbackTime}
+                          onChange={(e) => {
+                            const t = parseFloat(e.target.value);
+                            setPlaybackTime(t);
+                            if (audioRef.current) audioRef.current.currentTime = t;
+                          }}
+                          style={{
+                            position: 'absolute',
+                            inset: 0,
+                            width: '100%',
+                            height: '100%',
+                            opacity: 0,
+                            cursor: 'pointer',
+                            zIndex: 4
+                          }}
+                        />
+
+                        {/* Chapter Divider Notches */}
+                        <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', display: 'flex', zIndex: 2 }}>
+                          {scenes.map((_: any, i: number) => {
+                            if (i === 0) return null;
+                            const pct = (i / scenes.length) * 100;
+                            return (
+                              <div
+                                key={i}
+                                style={{
+                                  position: 'absolute',
+                                  left: `${pct}%`,
+                                  top: '1px',
+                                  width: '2px',
+                                  height: '6px',
+                                  background: '#070B14'
+                                }}
+                              />
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* YouTube Bottom Player Buttons */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                        {/* Left Controls */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          {/* Play / Pause Button */}
+                          <button
+                            onClick={togglePlayPause}
+                            style={{
+                              background: 'transparent',
+                              border: 'none',
+                              color: '#FFFFFF',
+                              cursor: 'pointer',
+                              padding: '4px',
+                              display: 'grid',
+                              placeItems: 'center'
+                            }}
+                            title={isPlaying ? 'Pause' : 'Play'}
+                          >
+                            <Icon name={isPlaying ? 'pause' : 'play'} size={20} />
+                          </button>
+
+                          {/* Skip -10s */}
+                          <button
+                            onClick={() => {
+                              const nt = Math.max(0, playbackTime - 10);
+                              setPlaybackTime(nt);
+                              if (audioRef.current) audioRef.current.currentTime = nt;
+                            }}
+                            style={{ background: 'transparent', border: 'none', color: '#CBD5E1', cursor: 'pointer', fontSize: '11.5px', fontWeight: 700 }}
+                            title="Skip back 10 seconds"
+                          >
+                            ↺ 10s
+                          </button>
+
+                          {/* Skip +10s */}
+                          <button
+                            onClick={() => {
+                              const nt = Math.min(totalDuration, playbackTime + 10);
+                              setPlaybackTime(nt);
+                              if (audioRef.current) audioRef.current.currentTime = nt;
+                            }}
+                            style={{ background: 'transparent', border: 'none', color: '#CBD5E1', cursor: 'pointer', fontSize: '11.5px', fontWeight: 700 }}
+                            title="Skip forward 10 seconds"
+                          >
+                            ↻ 10s
+                          </button>
+
+                          {/* Prev Chapter */}
+                          <button
+                            onClick={() => jumpToScene(Math.max(0, currentSceneIdx - 1))}
+                            disabled={currentSceneIdx === 0}
+                            style={{ background: 'transparent', border: 'none', color: currentSceneIdx === 0 ? '#475569' : '#CBD5E1', cursor: currentSceneIdx === 0 ? 'default' : 'pointer' }}
+                            title="Previous Chapter"
+                          >
+                            ⏮
+                          </button>
+
+                          {/* Next Chapter */}
+                          <button
+                            onClick={() => jumpToScene(Math.min(scenes.length - 1, currentSceneIdx + 1))}
+                            disabled={currentSceneIdx === scenes.length - 1}
+                            style={{ background: 'transparent', border: 'none', color: currentSceneIdx === scenes.length - 1 ? '#475569' : '#CBD5E1', cursor: currentSceneIdx === scenes.length - 1 ? 'default' : 'pointer' }}
+                            title="Next Chapter"
+                          >
+                            ⏭
+                          </button>
+
+                          {/* Volume & Mute */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <button
+                              onClick={() => {
+                                if (isMuted) {
+                                  setIsMuted(false);
+                                  if (volume === 0) setVolume(80);
+                                } else {
+                                  setIsMuted(true);
+                                }
+                              }}
+                              style={{ background: 'transparent', border: 'none', color: isMuted ? '#EF4444' : '#CBD5E1', cursor: 'pointer', padding: 0 }}
+                              title={isMuted ? 'Unmute' : 'Mute'}
+                            >
+                              <Icon name={isMuted || volume === 0 ? 'volume-x' : volume < 50 ? 'volume-1' : 'volume-2'} size={18} />
+                            </button>
+                            <input
+                              type="range"
+                              min="0"
+                              max="100"
+                              value={isMuted ? 0 : volume}
+                              onChange={(e) => {
+                                const v = parseInt(e.target.value);
+                                setVolume(v);
+                                if (v > 0 && isMuted) setIsMuted(false);
+                              }}
+                              style={{ width: '55px', height: '4px', accentColor: '#EF4444', cursor: 'pointer' }}
+                            />
+                          </div>
+
+                          {/* Time Readout */}
+                          <span style={{ fontSize: '12px', fontFamily: 'monospace', color: '#E2E8F0' }}>
+                            {Math.floor(playbackTime / 60)}:{String(Math.floor(playbackTime % 60)).padStart(2, '0')} / {Math.floor(totalDuration / 60)}:{String(Math.floor(totalDuration % 60)).padStart(2, '0')}
+                          </span>
+                        </div>
+
+                        {/* Right Controls */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                          {/* Active Chapter Label */}
+                          <span style={{ fontSize: '12px', color: '#38BDF8', fontWeight: 700 }}>
+                            Ch {currentSceneIdx + 1}: {currentScene.title}
+                          </span>
+
+                          {/* CC Toggle */}
+                          <button
+                            onClick={() => setShowCaptions(!showCaptions)}
+                            style={{
+                              background: 'transparent',
+                              border: showCaptions ? '1px solid #EF4444' : '1px solid rgba(255, 255, 255, 0.2)',
+                              color: showCaptions ? '#EF4444' : '#94A3B8',
+                              padding: '2px 6px',
+                              borderRadius: '4px',
+                              fontSize: '11px',
+                              fontWeight: 800,
+                              cursor: 'pointer'
+                            }}
+                            title="Subtitles (CC)"
+                          >
+                            CC
+                          </button>
+
+                          {/* Playback Speed */}
+                          <select
+                            value={playbackSpeed}
+                            onChange={(e) => {
+                              const spd = parseFloat(e.target.value);
+                              setPlaybackSpeed(spd);
+                              if (audioRef.current) audioRef.current.playbackRate = spd;
+                            }}
+                            style={{
+                              height: '26px',
+                              padding: '0 6px',
+                              fontSize: '11px',
+                              background: 'rgba(15, 23, 42, 0.8)',
+                              color: '#FFFFFF',
+                              border: '1px solid rgba(255, 255, 255, 0.2)',
+                              borderRadius: '4px',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            <option value="0.75">0.75x</option>
+                            <option value="1.0">1.0x</option>
+                            <option value="1.25">1.25x</option>
+                            <option value="1.5">1.5x</option>
+                            <option value="2.0">2.0x</option>
+                          </select>
+
+                          {/* Fullscreen Toggle */}
+                          <button
+                            onClick={() => setIsFullscreen(!isFullscreen)}
+                            style={{ background: 'transparent', border: 'none', color: '#CBD5E1', cursor: 'pointer', padding: 0 }}
+                            title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
+                          >
+                            <Icon name="maximize" size={16} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Hidden Audio Element */}
+                    {resolvedAudioUrl && (
+                      <audio
+                        ref={audioRef}
+                        src={resolvedAudioUrl.startsWith('http') ? resolvedAudioUrl : `http://127.0.0.1:8000${resolvedAudioUrl}`}
+                        preload="auto"
+                        onTimeUpdate={() => {
+                          if (audioRef.current) {
+                            const ct = audioRef.current.currentTime;
+                            setPlaybackTime(ct);
+                            let acc = 0;
+                            for (let i = 0; i < scenes.length; i++) {
+                              acc += parseFloat(scenes[i].duration_seconds || 18);
+                              if (ct <= acc) {
+                                setCurrentSceneIdx(i);
+                                break;
+                              }
+                            }
+                          }
+                        }}
+                        onEnded={() => {
+                          setIsPlaying(false);
+                          setPlaybackTime(0);
+                          setCurrentSceneIdx(0);
+                        }}
+                        onError={(e) => {
+                          console.warn('Audio playback error, falling back to Web Speech:', e);
+                        }}
+                        style={{ display: 'none' }}
+                      />
+                    )}
+                  </div>
+
+                  {/* ========================================================================= */}
+                  {/* 2. YOUTUBE VIDEO TITLE & METADATA BAR                                     */}
+                  {/* ========================================================================= */}
+                  <div
+                    style={{
+                      background: 'var(--surface)',
+                      borderRadius: '16px',
+                      border: '1px solid var(--line)',
+                      padding: '18px 24px',
+                      boxShadow: 'var(--shadow)',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                      gap: '16px'
+                    }}
+                  >
+                    <div>
+                      <h1 style={{ fontSize: '22px', fontWeight: 800, color: 'var(--ink)', margin: '0 0 6px 0' }}>
+                        Visual Masterclass: {topic.topic_name} — Complete In-Depth Guide
+                      </h1>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '13px', color: 'var(--muted)', flexWrap: 'wrap' }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#38BDF8', fontWeight: 700 }}>
+                          ✦ StudyPilot AI Academy
+                        </span>
+                        <span>•</span>
+                        <span>{scenes.length} Progressive Chapters</span>
+                        <span>•</span>
+                        <span>Curriculum: {topic.subject_name}</span>
+                        <span>•</span>
+                        <span>Exam Focus: {activeExam?.exam_name || 'Target Examination'}</span>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                      <button
+                        onClick={() => {
+                          setActiveTab('tutor');
+                          handleSendChatMessage(`In the animated video masterclass for "${topic.topic_name}", Chapter ${currentSceneIdx + 1} (${currentScene.title}): Can you provide an even deeper explanation with additional real-world analogies?`);
+                        }}
+                        className="btn sm primary"
+                        style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                      >
+                        <Icon name="robot" size={14} /> Ask AI Tutor
+                      </button>
+
+                      {currentScene.analogy && (
+                        <button
+                          onClick={() => setShowAnalogyMode(!showAnalogyMode)}
+                          className="btn sm"
+                          style={{
+                            background: showAnalogyMode ? 'rgba(251, 191, 36, 0.2)' : 'var(--surface2)',
+                            borderColor: showAnalogyMode ? '#FBBF24' : 'var(--line)',
+                            color: showAnalogyMode ? '#FBBF24' : 'var(--muted)',
+                            fontWeight: 700
+                          }}
+                        >
+                          💡 {showAnalogyMode ? 'Analogy Active' : 'Everyday Analogy'}
+                        </button>
+                      )}
+
+                      <button
+                        onClick={() => setShowTranscript(!showTranscript)}
+                        className="btn sm"
+                        style={{
+                          background: showTranscript ? 'rgba(56, 189, 248, 0.18)' : 'var(--surface2)',
+                          borderColor: showTranscript ? '#38BDF8' : 'var(--line)',
+                          color: showTranscript ? '#38BDF8' : 'var(--muted)',
+                          fontWeight: 700
+                        }}
+                      >
+                        📜 {showTranscript ? 'Hide Transcript' : 'Transcript'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Everyday Analogy Banner */}
+                  {showAnalogyMode && currentScene.analogy && (
+                    <div style={{ padding: '14px 20px', background: 'rgba(251, 191, 36, 0.1)', border: '1px solid rgba(251, 191, 36, 0.35)', borderRadius: '14px', color: '#FEF3C7', fontSize: '14px', lineHeight: 1.6 }}>
+                      <strong style={{ color: '#FBBF24', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                        💡 Beginner Intuition & Everyday Analogy:
+                      </strong>
+                      {currentScene.analogy}
+                    </div>
+                  )}
+
+                  {/* Synced Interactive Transcript */}
+                  {showTranscript && (
+                    <div style={{ background: 'var(--surface)', borderRadius: '14px', border: '1px solid var(--line)', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '220px', overflowY: 'auto' }}>
+                      <div style={{ fontSize: '13px', fontWeight: 700, color: '#38BDF8', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <Icon name="file-text" size={14} />
+                        <span>Interactive Synchronized Transcript (Click any line to jump)</span>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        {(videoData.subtitles_json || []).map((sub: any, sIdx: number) => {
+                          const isCurrent = playbackTime >= sub.start && playbackTime <= sub.end;
+                          return (
+                            <button
+                              key={sIdx}
+                              onClick={() => {
+                                setPlaybackTime(sub.start);
+                                if (audioRef.current) {
+                                  audioRef.current.currentTime = sub.start;
+                                  if (!isPlaying) audioRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
+                                }
+                              }}
+                              style={{
+                                textAlign: 'left',
+                                padding: '6px 10px',
+                                borderRadius: '6px',
+                                fontSize: '12.5px',
+                                background: isCurrent ? 'rgba(56, 189, 248, 0.15)' : 'transparent',
+                                border: isCurrent ? '1px solid #38BDF8' : '1px solid transparent',
+                                color: isCurrent ? 'var(--ink)' : 'var(--muted)',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                gap: '10px',
+                                alignItems: 'baseline'
+                              }}
+                            >
+                              <span style={{ fontSize: '11px', fontFamily: 'monospace', color: '#38BDF8', flexShrink: 0 }}>
+                                {Math.floor(sub.start / 60)}:{String(Math.floor(sub.start % 60)).padStart(2, '0')}
+                              </span>
+                              <span>{sub.text}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ========================================================================= */}
+                  {/* 3. TWO-COLUMN YOUTUBE LAYOUT (DEEP NOTES + CHAPTER PLAYLIST)              */}
+                  {/* ========================================================================= */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.8fr) minmax(0, 1.2fr)', gap: '24px', alignItems: 'start' }}>
+                    
+                    {/* Left Column: Deep Explanation Notes & Hands-On Simulators */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                      
+                      {/* Deep Explanation Card (YouTube Description & Lecture Notes) */}
+                      <div
+                        className="card"
+                        style={{
+                          padding: '24px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '16px',
+                          background: 'var(--surface)',
+                          borderRadius: '16px',
+                          border: '1px solid var(--line)',
+                          boxShadow: 'var(--shadow)'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#38BDF8', fontWeight: 800 }}>
+                            📖 Deep Concept Explanation
+                          </span>
+                          <span style={{ fontSize: '11px', color: 'var(--muted)' }}>
+                            Chapter {currentSceneIdx + 1}
+                          </span>
+                        </div>
+
+                        <h2 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: 'var(--ink)' }}>
+                          {currentScene.title}
+                        </h2>
+
+                        <p style={{ fontSize: '14.5px', color: 'var(--ink)', lineHeight: 1.65, margin: 0 }}>
+                          {currentScene.deep_explanation || currentScene.voiceover_text}
+                        </p>
+
+                        {/* Bullet Points Breakdown */}
                         {slide.bullet_points && slide.bullet_points.length > 0 && (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', background: 'var(--surface2)', padding: '14px 18px', borderRadius: '10px' }}>
+                            <div style={{ fontSize: '12px', fontWeight: 700, color: '#38BDF8', textTransform: 'uppercase' }}>
+                              Core Key Invariants:
+                            </div>
                             {slide.bullet_points.map((pt: string, pIdx: number) => (
-                              <div key={pIdx} style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', fontSize: '13.5px', color: '#E8EEF4' }}>
-                                <span style={{ color: '#4CC98A', fontWeight: 700, flexShrink: 0 }}>✦</span>
+                              <div key={pIdx} style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '13px', color: 'var(--ink)' }}>
+                                <span style={{ color: '#10B981', fontWeight: 700 }}>✓</span>
                                 <span>{pt}</span>
                               </div>
                             ))}
                           </div>
                         )}
 
-                        {/* LaTeX Formula Box */}
+                        {/* LaTeX Formula Callout Box if applicable */}
                         {slide.formula_latex && (
-                          <div style={{ padding: '10px 14px', background: '#0C131B', border: '1px solid #F0B23C', borderRadius: '10px', fontFamily: 'monospace', fontSize: '14px', color: '#F0B23C', width: 'fit-content', marginTop: '6px' }}>
-                            📐 {slide.formula_latex}
+                          <div style={{ padding: '12px 18px', background: 'rgba(251, 191, 36, 0.1)', border: '1px solid rgba(251, 191, 36, 0.4)', borderRadius: '10px', color: '#FBBF24', fontFamily: 'monospace', fontSize: '14px' }}>
+                            📐 Governing Law: {slide.formula_latex}
                           </div>
                         )}
                       </div>
 
-                      {/* Right Pane: Animated SVG Diagram & Clickable Hotspots */}
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                        <div
-                          style={{
-                            background: '#0C131B',
-                            borderRadius: '12px',
-                            border: '1px solid #263648',
-                            padding: '16px',
-                            minHeight: '190px',
-                            display: 'grid',
-                            placeItems: 'center',
-                            overflow: 'hidden'
-                          }}
-                        >
-                          {slide.diagram_svg ? (
-                            <div
-                              style={{ width: '100%', display: 'flex', justifyContent: 'center' }}
-                              dangerouslySetInnerHTML={{ __html: formatDiagramSvg(slide.diagram_svg, topic.topic_name) }}
-                            />
-                          ) : (
-                            <div style={{ textAlign: 'center', color: '#92A3B5', fontSize: '13px' }}>
-                              <Icon name="brain" size={36} style={{ color: '#54C2F0', margin: '0 auto 8px' }} />
-                              <div>Visual Concept Diagram</div>
-                              <div style={{ fontSize: '11px', marginTop: '4px' }}>{currentScene.visual_instructions || 'Animated concept demonstration'}</div>
-                            </div>
-                          )}
-                        </div>
+                      {/* Interactive Hands-On Variable Parameter Simulator */}
+                      {currentScene.interactive_sim && (() => {
+                        const sim = currentScene.interactive_sim;
+                        const curVal = simParams[currentSceneIdx] ?? sim.default ?? 2;
+                        const stateInfo = sim.states ? (sim.states[String(curVal)] || sim.states[curVal]) : null;
 
-                        {/* Interactive Diagram Hotspots */}
-                        {currentScene.hotspots && currentScene.hotspots.length > 0 && (
-                          <div style={{ background: '#0C131B', borderRadius: '10px', border: '1px solid #263648', padding: '10px 14px' }}>
-                            <div style={{ fontSize: '11px', color: '#92A3B5', marginBottom: '6px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                              Interactive Diagram Components:
+                        return (
+                          <div style={{ background: 'var(--surface)', borderRadius: '16px', border: '1px solid var(--line)', padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px', boxShadow: 'var(--shadow)' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span style={{ fontSize: '13px', fontWeight: 800, color: '#10B981' }}>🔬 Hands-On Simulator:</span>
+                                <span style={{ fontSize: '13px', color: 'var(--ink)', fontWeight: 600 }}>{sim.param_name}</span>
+                              </div>
+                              <div style={{ fontSize: '12px', color: 'var(--muted)', background: 'var(--surface2)', padding: '4px 10px', borderRadius: '6px' }}>
+                                Setting: <strong style={{ color: '#38BDF8' }}>{curVal} {sim.unit || ''}</strong> {stateInfo?.label ? `(${stateInfo.label})` : ''}
+                              </div>
                             </div>
-                            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                              {currentScene.hotspots.map((h: any) => {
-                                const isSpotActive = activeHotspot === h.id;
+
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                              <span style={{ fontSize: '11px', color: 'var(--muted)' }}>Min ({sim.min || 1})</span>
+                              <input
+                                type="range"
+                                min={sim.min || 1}
+                                max={sim.max || 5}
+                                step={1}
+                                value={curVal}
+                                onChange={(e) => {
+                                  const val = parseInt(e.target.value);
+                                  setSimParams(prev => ({ ...prev, [currentSceneIdx]: val }));
+                                }}
+                                style={{ flex: 1, accentColor: '#10B981', height: '6px', cursor: 'pointer' }}
+                              />
+                              <span style={{ fontSize: '11px', color: 'var(--muted)' }}>Max ({sim.max || 5})</span>
+                            </div>
+
+                            {stateInfo && (
+                              <div style={{ fontSize: '13px', color: 'var(--ink)', background: 'rgba(16, 185, 129, 0.08)', padding: '10px 14px', borderRadius: '8px', borderLeft: '3px solid #10B981', lineHeight: 1.5 }}>
+                                <strong style={{ color: '#10B981' }}>System Response:</strong> {stateInfo.effect}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+
+                      {/* In-Video Understanding Checkpoint Quiz */}
+                      {currentScene.checkpoint_quiz && (() => {
+                        const quiz = currentScene.checkpoint_quiz;
+                        const selectedOpt = checkpointAnswers[currentSceneIdx];
+                        const isRevealed = checkpointRevealed[currentSceneIdx];
+                        const isCorrect = selectedOpt === quiz.correct_index;
+
+                        return (
+                          <div style={{ background: 'var(--surface)', borderRadius: '16px', border: '1px solid var(--line)', padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px', boxShadow: 'var(--shadow)' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span style={{ fontSize: '13px', fontWeight: 800, color: '#FBBF24' }}>💡 Chapter {currentSceneIdx + 1} Knowledge Check:</span>
+                                <span style={{ fontSize: '12px', color: 'var(--muted)' }}>(Confirm comprehension)</span>
+                              </div>
+                              {isRevealed && (
+                                <span style={{ fontSize: '12px', fontWeight: 700, color: isCorrect ? '#10B981' : '#EF4444' }}>
+                                  {isCorrect ? '✓ Correct! Concept Mastered.' : '✘ Not quite. See hint below.'}
+                                </span>
+                              )}
+                            </div>
+
+                            <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--ink)', lineHeight: 1.5 }}>
+                              {quiz.question}
+                            </div>
+
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              {(quiz.options || []).map((opt: string, oIdx: number) => {
+                                const isThisSelected = selectedOpt === oIdx;
+                                let optBg = 'var(--surface2)';
+                                let optBorder = 'var(--line)';
+                                let optColor = 'var(--ink)';
+
+                                if (isRevealed) {
+                                  if (oIdx === quiz.correct_index) {
+                                    optBg = 'rgba(16, 185, 129, 0.15)';
+                                    optBorder = '#10B981';
+                                    optColor = '#10B981';
+                                  } else if (isThisSelected) {
+                                    optBg = 'rgba(239, 68, 68, 0.15)';
+                                    optBorder = '#EF4444';
+                                    optColor = '#EF4444';
+                                  }
+                                } else if (isThisSelected) {
+                                  optBg = 'rgba(56, 189, 248, 0.15)';
+                                  optBorder = '#38BDF8';
+                                  optColor = '#38BDF8';
+                                }
+
                                 return (
                                   <button
-                                    key={h.id}
-                                    onClick={() => setActiveHotspot(isSpotActive ? null : h.id)}
+                                    key={oIdx}
+                                    onClick={() => {
+                                      setCheckpointAnswers(prev => ({ ...prev, [currentSceneIdx]: oIdx }));
+                                      setCheckpointRevealed(prev => ({ ...prev, [currentSceneIdx]: true }));
+                                    }}
                                     style={{
-                                      padding: '4px 10px',
-                                      borderRadius: '6px',
-                                      fontSize: '11px',
-                                      border: '1px solid',
-                                      borderColor: isSpotActive ? '#54C2F0' : '#263648',
-                                      background: isSpotActive ? 'rgba(84, 194, 240, 0.25)' : '#141E2A',
-                                      color: isSpotActive ? '#FFFFFF' : '#92A3B5',
+                                      padding: '10px 14px',
+                                      borderRadius: '8px',
+                                      textAlign: 'left',
+                                      fontSize: '13px',
+                                      background: optBg,
+                                      border: `1px solid ${optBorder}`,
+                                      color: optColor,
                                       cursor: 'pointer',
                                       transition: 'all 0.15s ease'
                                     }}
                                   >
-                                    <span style={{ color: '#54C2F0', fontWeight: 800, marginRight: '4px' }}>[{h.badge || '✦'}]</span>
-                                    {h.title}
+                                    <span style={{ fontWeight: 700, marginRight: '8px' }}>{String.fromCharCode(65 + oIdx)}.</span>
+                                    {opt}
                                   </button>
                                 );
                               })}
                             </div>
-                            {activeHotspot && (() => {
-                              const spot = currentScene.hotspots.find((h: any) => h.id === activeHotspot);
-                              if (!spot) return null;
-                              return (
-                                <div style={{ marginTop: '8px', padding: '8px 12px', background: '#141E2A', borderRadius: '8px', border: '1px solid #54C2F0', fontSize: '12px', color: '#E8EEF4', lineHeight: 1.45 }}>
-                                  <strong style={{ color: '#54C2F0' }}>{spot.title}:</strong> {spot.desc}
-                                </div>
-                              );
-                            })()}
-                          </div>
-                        )}
-                      </div>
 
-                      {/* Live Synchronized Subtitle Caption Bar */}
-                      {showCaptions && (
-                        <div
-                          style={{
-                            gridColumn: '1 / -1',
-                            background: 'rgba(12, 19, 27, 0.88)',
-                            backdropFilter: 'blur(8px)',
-                            border: '1px solid rgba(84, 194, 240, 0.3)',
-                            borderRadius: '10px',
-                            padding: '10px 18px',
-                            textAlign: 'center',
-                            fontSize: '14px',
-                            color: '#FFFFFF',
-                            fontWeight: 500,
-                            lineHeight: 1.45,
-                            boxShadow: '0 4px 16px rgba(0, 0, 0, 0.3)'
-                          }}
-                        >
-                          {(() => {
-                            const subs = videoData.subtitles_json || [];
-                            const matchingSub = subs.find((s: any) => playbackTime >= s.start && playbackTime <= s.end);
-                            if (matchingSub) return `“${matchingSub.text}”`;
-                            return `“${currentScene.voiceover_text || 'Listening to visual concept lecture...'}”`;
-                          })()}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* 4. Hands-On Variable Parameter Simulator */}
-                    {currentScene.interactive_sim && (() => {
-                      const sim = currentScene.interactive_sim;
-                      const curVal = simParams[currentSceneIdx] ?? sim.default ?? 2;
-                      const stateInfo = sim.states ? (sim.states[String(curVal)] || sim.states[curVal]) : null;
-
-                      return (
-                        <div style={{ background: '#141E2A', borderRadius: '12px', border: '1px solid #263648', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                              <span style={{ fontSize: '13px', fontWeight: 800, color: '#4CC98A' }}>🔬 Hands-On Parameter Simulator:</span>
-                              <span style={{ fontSize: '13px', color: '#E8EEF4', fontWeight: 600 }}>{sim.param_name}</span>
-                            </div>
-                            <div style={{ fontSize: '12px', color: '#92A3B5', background: '#0C131B', padding: '4px 10px', borderRadius: '6px', border: '1px solid #263648' }}>
-                              Setting: <strong style={{ color: '#54C2F0' }}>{curVal} {sim.unit || ''}</strong> {stateInfo?.label ? `(${stateInfo.label})` : ''}
-                            </div>
-                          </div>
-
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                            <span style={{ fontSize: '11px', color: '#92A3B5' }}>Min ({sim.min || 1})</span>
-                            <input
-                              type="range"
-                              min={sim.min || 1}
-                              max={sim.max || 5}
-                              step={1}
-                              value={curVal}
-                              onChange={(e) => {
-                                const val = parseInt(e.target.value);
-                                setSimParams(prev => ({ ...prev, [currentSceneIdx]: val }));
-                              }}
-                              style={{ flex: 1, accentColor: '#4CC98A', height: '6px', cursor: 'pointer' }}
-                            />
-                            <span style={{ fontSize: '11px', color: '#92A3B5' }}>Max ({sim.max || 5})</span>
-                          </div>
-
-                          {stateInfo && (
-                            <div style={{ fontSize: '12.5px', color: '#C4D3E0', background: 'rgba(76, 201, 138, 0.08)', padding: '8px 14px', borderRadius: '8px', borderLeft: '3px solid #4CC98A', lineHeight: 1.45 }}>
-                              <strong style={{ color: '#4CC98A' }}>Dynamic System Response:</strong> {stateInfo.effect}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })()}
-
-                    {/* 5. Level Understanding Checkpoint Pop-Quiz */}
-                    {currentScene.checkpoint_quiz && (() => {
-                      const quiz = currentScene.checkpoint_quiz;
-                      const selectedOpt = checkpointAnswers[currentSceneIdx];
-                      const isRevealed = checkpointRevealed[currentSceneIdx];
-                      const isCorrect = selectedOpt === quiz.correct_index;
-
-                      return (
-                        <div style={{ background: '#141E2A', borderRadius: '12px', border: '1px solid #263648', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                              <span style={{ fontSize: '13px', fontWeight: 800, color: '#F0B23C' }}>💡 Level {currentSceneIdx + 1} Understanding Check:</span>
-                              <span style={{ fontSize: '12px', color: '#92A3B5' }}>(Confirm comprehension before advancing)</span>
-                            </div>
                             {isRevealed && (
-                              <span style={{ fontSize: '12px', fontWeight: 700, color: isCorrect ? '#4CC98A' : '#F06565' }}>
-                                {isCorrect ? '✓ Correct! Stage Mastered.' : '✘ Not quite. Check the hint below.'}
-                              </span>
+                              <div style={{ padding: '10px 14px', borderRadius: '8px', background: isCorrect ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)', border: `1px solid ${isCorrect ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`, fontSize: '13px', color: 'var(--ink)', lineHeight: 1.5 }}>
+                                <strong>{isCorrect ? 'Explanation:' : 'Hint:'}</strong> {isCorrect ? quiz.explanation : (quiz.hint || quiz.explanation)}
+                              </div>
                             )}
                           </div>
-
-                          <div style={{ fontSize: '14px', fontWeight: 600, color: '#E8EEF4', lineHeight: 1.45 }}>
-                            {quiz.question}
-                          </div>
-
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                            {(quiz.options || []).map((opt: string, oIdx: number) => {
-                              const isThisSelected = selectedOpt === oIdx;
-                              let optBg = '#0C131B';
-                              let optBorder = '#263648';
-                              let optColor = '#E8EEF4';
-
-                              if (isRevealed) {
-                                if (oIdx === quiz.correct_index) {
-                                  optBg = 'rgba(76, 201, 138, 0.2)';
-                                  optBorder = '#4CC98A';
-                                  optColor = '#4CC98A';
-                                } else if (isThisSelected) {
-                                  optBg = 'rgba(240, 101, 101, 0.2)';
-                                  optBorder = '#F06565';
-                                  optColor = '#F06565';
-                                }
-                              } else if (isThisSelected) {
-                                optBg = 'rgba(84, 194, 240, 0.2)';
-                                optBorder = '#54C2F0';
-                                optColor = '#FFFFFF';
-                              }
-
-                              return (
-                                <button
-                                  key={oIdx}
-                                  onClick={() => {
-                                    setCheckpointAnswers(prev => ({ ...prev, [currentSceneIdx]: oIdx }));
-                                    setCheckpointRevealed(prev => ({ ...prev, [currentSceneIdx]: true }));
-                                  }}
-                                  style={{
-                                    padding: '10px 14px',
-                                    borderRadius: '8px',
-                                    textAlign: 'left',
-                                    fontSize: '13px',
-                                    background: optBg,
-                                    border: `1px solid ${optBorder}`,
-                                    color: optColor,
-                                    cursor: 'pointer',
-                                    transition: 'all 0.15s ease'
-                                  }}
-                                >
-                                  <span style={{ fontWeight: 700, marginRight: '8px' }}>{String.fromCharCode(65 + oIdx)}.</span>
-                                  {opt}
-                                </button>
-                              );
-                            })}
-                          </div>
-
-                          {isRevealed && (
-                            <div style={{ padding: '10px 14px', borderRadius: '8px', background: isCorrect ? 'rgba(76, 201, 138, 0.1)' : 'rgba(240, 101, 101, 0.1)', border: `1px solid ${isCorrect ? 'rgba(76, 201, 138, 0.3)' : 'rgba(240, 101, 101, 0.3)'}`, fontSize: '12.5px', color: '#E8EEF4', lineHeight: 1.5 }}>
-                              <strong>{isCorrect ? 'Explanation:' : 'Hint:'}</strong> {isCorrect ? quiz.explanation : (quiz.hint || quiz.explanation)}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })()}
-
-                    {/* 6. Ask AI Tutor About This Scene Direct Action */}
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 18px', background: '#141E2A', borderRadius: '12px', border: '1px solid #263648', flexWrap: 'wrap', gap: '10px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#92A3B5' }}>
-                        <Icon name="sparkles" size={16} style={{ color: '#54C2F0' }} />
-                        <span>Need an even simpler explanation or more examples for this stage?</span>
-                      </div>
-                      <button
-                        className="btn sm primary"
-                        onClick={() => {
-                          setActiveTab('tutor');
-                          handleSendChatMessage(`In the animated visual class for "${topic.topic_name}", Stage ${currentSceneIdx + 1} (${currentScene.title}): can you explain this from basic to advanced using another simple, everyday real-world example?`);
-                        }}
-                        style={{ fontSize: '12px' }}
-                      >
-                        <Icon name="robot" size={14} /> Ask AI Tutor About Stage {currentSceneIdx + 1}
-                      </button>
+                        );
+                      })()}
                     </div>
 
-                    {/* 7. Interactive Synchronized Transcript */}
-                    {showTranscript && (
-                      <div style={{ background: '#141E2A', borderRadius: '12px', border: '1px solid #263648', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '220px', overflowY: 'auto' }}>
-                        <div style={{ fontSize: '13px', fontWeight: 700, color: '#54C2F0', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <Icon name="file-text" size={14} />
-                          <span>Interactive Synchronized Transcript (Click any line to jump)</span>
-                        </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                          {(videoData.subtitles_json || []).map((sub: any, sIdx: number) => {
-                            const isCurrent = playbackTime >= sub.start && playbackTime <= sub.end;
-                            return (
-                              <button
-                                key={sIdx}
-                                onClick={() => {
-                                  setPlaybackTime(sub.start);
-                                  if (audioRef.current) {
-                                    audioRef.current.currentTime = sub.start;
-                                    if (!isPlaying) audioRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
-                                  }
-                                }}
+                    {/* Right Column: YouTube "Up Next / Chapters Playlist" */}
+                    <div
+                      className="card"
+                      style={{
+                        padding: '20px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '12px',
+                        background: 'var(--surface)',
+                        borderRadius: '16px',
+                        border: '1px solid var(--line)',
+                        boxShadow: 'var(--shadow)',
+                        position: 'sticky',
+                        top: '20px'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--line)', paddingBottom: '10px' }}>
+                        <span style={{ fontSize: '13px', fontWeight: 800, color: 'var(--ink)' }}>
+                          📑 Video Chapters ({scenes.length})
+                        </span>
+                        <span style={{ fontSize: '11px', color: 'var(--muted)' }}>
+                          Click to Jump
+                        </span>
+                      </div>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '560px', overflowY: 'auto' }}>
+                        {scenes.map((sc: any, idx: number) => {
+                          const isActive = currentSceneIdx === idx;
+                          let accTime = 0;
+                          for (let i = 0; i < idx; i++) {
+                            accTime += parseFloat(scenes[i].duration_seconds || 18);
+                          }
+
+                          return (
+                            <button
+                              key={sc.id || idx}
+                              onClick={() => jumpToScene(idx)}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '12px',
+                                padding: '10px 12px',
+                                borderRadius: '10px',
+                                border: isActive ? '1.5px solid #38BDF8' : '1px solid var(--line)',
+                                background: isActive ? 'rgba(56, 189, 248, 0.12)' : 'var(--surface2)',
+                                cursor: 'pointer',
+                                textAlign: 'left',
+                                transition: 'all 0.15s ease'
+                              }}
+                            >
+                              {/* Chapter Thumbnail Icon */}
+                              <div
                                 style={{
-                                  textAlign: 'left',
-                                  padding: '6px 10px',
+                                  width: '42px',
+                                  height: '36px',
                                   borderRadius: '6px',
-                                  fontSize: '12.5px',
-                                  background: isCurrent ? 'rgba(84, 194, 240, 0.18)' : 'transparent',
-                                  border: isCurrent ? '1px solid #54C2F0' : '1px solid transparent',
-                                  color: isCurrent ? '#FFFFFF' : '#92A3B5',
-                                  cursor: 'pointer',
-                                  display: 'flex',
-                                  gap: '10px',
-                                  alignItems: 'baseline'
+                                  background: isActive ? '#38BDF8' : '#0F172A',
+                                  color: isActive ? '#070B14' : '#38BDF8',
+                                  display: 'grid',
+                                  placeItems: 'center',
+                                  flexShrink: 0,
+                                  fontWeight: 800,
+                                  fontSize: '12px'
                                 }}
                               >
-                                <span style={{ fontSize: '11px', fontFamily: 'monospace', color: '#54C2F0', flexShrink: 0 }}>
-                                  {Math.floor(sub.start / 60)}:{String(Math.floor(sub.start % 60)).padStart(2, '0')}
-                                </span>
-                                <span>{sub.text}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
+                                {isActive ? '▶' : `${idx + 1}`}
+                              </div>
+
+                              <div style={{ minWidth: 0, flex: 1 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                  <span style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.06em', color: isActive ? '#38BDF8' : 'var(--muted)', fontWeight: 800 }}>
+                                    {isActive ? 'ılılı PLAYING' : `Chapter ${idx + 1}`}
+                                  </span>
+                                  <span style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--muted)' }}>
+                                    {Math.floor(accTime / 60)}:{String(Math.floor(accTime % 60)).padStart(2, '0')}
+                                  </span>
+                                </div>
+                                <div style={{ fontSize: '12.5px', fontWeight: 700, color: isActive ? 'var(--ink)' : 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                  {sc.title}
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })}
                       </div>
-                    )}
-                  </>
-                );
-              })()}
+                    </div>
 
-              {/* 8. Video Player Controls Bar */}
-              <div
-                style={{
-                  background: '#141E2A',
-                  borderRadius: '12px',
-                  border: '1px solid #263648',
-                  padding: '12px 18px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '16px',
-                  flexWrap: 'wrap'
-                }}
-              >
-                {/* Play / Pause Button */}
-                <button
-                  onClick={togglePlayPause}
-                  className="btn sm"
-                  style={{
-                    background: '#54C2F0',
-                    color: '#06202D',
-                    border: 'none',
-                    fontWeight: 700,
-                    width: '36px',
-                    height: '36px',
-                    borderRadius: '50%',
-                    padding: 0,
-                    display: 'grid',
-                    placeItems: 'center'
-                  }}
-                  title={isPlaying ? 'Pause Animation' : 'Play Animated Video'}
-                >
-                  <Icon name={isPlaying ? 'pause' : 'play'} size={16} />
-                </button>
-
-                {/* Timeline Seek Slider */}
-                <div style={{ flex: 1, minWidth: '180px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <span style={{ fontSize: '11px', fontFamily: 'monospace', color: '#92A3B5' }}>
-                    {Math.floor(playbackTime / 60)}:{String(Math.floor(playbackTime % 60)).padStart(2, '0')}
-                  </span>
-                  <input
-                    type="range"
-                    min="0"
-                    max={videoData.duration_seconds || 90}
-                    step="0.5"
-                    value={playbackTime}
-                    onChange={(e) => {
-                      const t = parseFloat(e.target.value);
-                      setPlaybackTime(t);
-                      if (audioRef.current) audioRef.current.currentTime = t;
-                    }}
-                    style={{ flex: 1, accentColor: '#54C2F0', height: '6px' }}
-                  />
-                  <span style={{ fontSize: '11px', fontFamily: 'monospace', color: '#92A3B5' }}>
-                    {Math.floor((videoData.duration_seconds || 90) / 60)}:{String(Math.floor((videoData.duration_seconds || 90) % 60)).padStart(2, '0')}
-                  </span>
+                  </div>
                 </div>
-
-                {/* Subtitles CC Toggle */}
-                <button
-                  onClick={() => setShowCaptions(!showCaptions)}
-                  className="btn sm"
-                  style={{
-                    background: showCaptions ? 'rgba(84, 194, 240, 0.2)' : 'transparent',
-                    borderColor: showCaptions ? '#54C2F0' : '#263648',
-                    color: showCaptions ? '#54C2F0' : '#92A3B5',
-                    fontSize: '11px',
-                    fontWeight: 700
-                  }}
-                  title="Toggle Closed Captions / Subtitles"
-                >
-                  CC {showCaptions ? 'ON' : 'OFF'}
-                </button>
-
-                {/* Playback Speed */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span style={{ fontSize: '11px', color: '#92A3B5' }}>Speed:</span>
-                  <select
-                    value={playbackSpeed}
-                    onChange={(e) => {
-                      const spd = parseFloat(e.target.value);
-                      setPlaybackSpeed(spd);
-                      if (audioRef.current) audioRef.current.playbackRate = spd;
-                    }}
-                    style={{ height: '28px', padding: '0 6px', fontSize: '11px', borderRadius: '6px', background: '#0C131B', borderColor: '#263648', color: '#E8EEF4' }}
-                  >
-                    <option value="1.0">1.0x</option>
-                    <option value="1.25">1.25x</option>
-                    <option value="1.5">1.5x</option>
-                  </select>
-                </div>
-
-                {/* Hidden Audio Element for Offline Synthesized Narration */}
-                {videoData.audio_url && (
-                  <audio
-                    ref={audioRef}
-                    src={videoData.audio_url.startsWith('http') ? videoData.audio_url : `http://127.0.0.1:8000${videoData.audio_url}`}
-                    onTimeUpdate={() => {
-                      if (audioRef.current) {
-                        const ct = audioRef.current.currentTime;
-                        setPlaybackTime(ct);
-                        let acc = 0;
-                        const scenes = videoData.scenes_json || [];
-                        for (let i = 0; i < scenes.length; i++) {
-                          acc += parseFloat(scenes[i].duration_seconds || 18);
-                          if (ct <= acc) {
-                            setCurrentSceneIdx(i);
-                            break;
-                          }
-                        }
-                      }
-                    }}
-                    onEnded={() => setIsPlaying(false)}
-                    style={{ display: 'none' }}
-                  />
-                )}
-              </div>
-            </div>
+              );
+            })()
           )}
         </div>
       )}
-
       {/* TAB 2: INTERACTIVE ACTIVITIES (Flashcards, Flip Cards, Matching, Worked Examples, Mnemonics) */}
       {activeTab === 'activities' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>

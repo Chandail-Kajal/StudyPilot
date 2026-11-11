@@ -3239,6 +3239,10 @@ class TopicInteractionUpdateRequest(BaseModel):
     flashcards_reviewed: Optional[int] = 0
     quiz_attempts: Optional[int] = 0
     comprehension_score: Optional[float] = 0.0
+    video_watched_seconds: Optional[int] = 0
+    audio_listened_seconds: Optional[int] = 0
+    incorrect_answers_count: Optional[int] = 0
+    repeated_explanations_count: Optional[int] = 0
     mark_studied: Optional[bool] = False
     mark_mastered: Optional[bool] = False
 
@@ -3444,6 +3448,10 @@ async def get_interactive_topic_studio(topic_id: str, user: dict = Depends(get_c
                     video_data[j_key] = json.loads(video_data[j_key])
                 except Exception:
                     pass
+        if not video_data.get("audio_url"):
+            v_url = video_data.get("video_url") or ""
+            if v_url.endswith((".wav", ".mp3", ".ogg")) or "/static/audio/" in v_url:
+                video_data["audio_url"] = v_url
 
     # Ensure studio_content has all 13 sections populated
     if studio_content:
@@ -3494,6 +3502,10 @@ def update_topic_interaction(topic_id: str, req: TopicInteractionUpdateRequest, 
         current_mastered = existing["has_mastered"]
         final_mastered = 1 if (current_mastered or has_mastered) else 0
         new_score = max(float(existing["comprehension_score"] or 0.0), float(req.comprehension_score or 0.0))
+        new_video_secs = max(int(existing.get("video_watched_seconds") or 0), int(req.video_watched_seconds or 0))
+        new_audio_secs = max(int(existing.get("audio_listened_seconds") or 0), int(req.audio_listened_seconds or 0))
+        new_incorrect = int(existing.get("incorrect_answers_count") or 0) + int(req.incorrect_answers_count or 0)
+        new_repeated = int(existing.get("repeated_explanations_count") or 0) + int(req.repeated_explanations_count or 0)
         cursor.execute("""
             UPDATE topic_interactions SET
                 has_studied = 1,
@@ -3502,6 +3514,10 @@ def update_topic_interaction(topic_id: str, req: TopicInteractionUpdateRequest, 
                 sections_completed = ?,
                 flashcards_reviewed = ?,
                 quiz_attempts = ?,
+                video_watched_seconds = ?,
+                audio_listened_seconds = ?,
+                incorrect_answers_count = ?,
+                repeated_explanations_count = ?,
                 last_interacted_at = ?,
                 updated_at = ?
             WHERE id = ?
@@ -3511,6 +3527,10 @@ def update_topic_interaction(topic_id: str, req: TopicInteractionUpdateRequest, 
             json.dumps(req.sections_completed),
             req.flashcards_reviewed,
             req.quiz_attempts,
+            new_video_secs,
+            new_audio_secs,
+            new_incorrect,
+            new_repeated,
             now_str,
             now_str,
             existing["id"]
@@ -3521,8 +3541,10 @@ def update_topic_interaction(topic_id: str, req: TopicInteractionUpdateRequest, 
             INSERT INTO topic_interactions (
                 id, user_id, topic_id, has_studied, has_mastered,
                 comprehension_score, sections_completed, flashcards_reviewed,
-                quiz_attempts, last_interacted_at, updated_at
-            ) VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)
+                quiz_attempts, video_watched_seconds, audio_listened_seconds,
+                incorrect_answers_count, repeated_explanations_count,
+                last_interacted_at, updated_at
+            ) VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             int_id,
             user["id"],
@@ -3532,9 +3554,25 @@ def update_topic_interaction(topic_id: str, req: TopicInteractionUpdateRequest, 
             json.dumps(req.sections_completed),
             req.flashcards_reviewed,
             req.quiz_attempts,
+            req.video_watched_seconds or 0,
+            req.audio_listened_seconds or 0,
+            req.incorrect_answers_count or 0,
+            req.repeated_explanations_count or 0,
             now_str,
             now_str
         ))
+
+    # Synchronize completion with active Study Plan daily task
+    try:
+        cursor.execute("""
+            UPDATE study_plan_tasks
+            SET status = 'completed', completed_at = ?
+            WHERE topic_id = ? AND status != 'completed' AND study_plan_id IN (
+                SELECT id FROM study_plans WHERE user_id = ?
+            )
+        """, (now_str, topic_id, user["id"]))
+    except Exception as e:
+        print(f"[Study Plan Task Sync Notice]: {e}")
 
     # Synchronize with topic_progress
     cursor.execute("SELECT * FROM topic_progress WHERE user_id = ? AND topic_id = ?", (user["id"], topic_id))
@@ -3662,6 +3700,10 @@ async def get_topic_video_endpoint(topic_id: str, user: dict = Depends(get_curre
                 r_dict[j_field] = json.loads(r_dict[j_field])
             except Exception:
                 pass
+    if not r_dict.get("audio_url"):
+        v_url = r_dict.get("video_url") or ""
+        if v_url.endswith((".wav", ".mp3", ".ogg")) or "/static/audio/" in v_url:
+            r_dict["audio_url"] = v_url
     return {"has_video": True, "video": r_dict}
 
 @app.post("/api/learning/topic/{topic_id}/video/regenerate")

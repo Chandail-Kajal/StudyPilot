@@ -726,6 +726,11 @@ export const api = {
     sections_completed?: string[];
     flashcards_reviewed?: number;
     quiz_attempts?: number;
+    video_watched_seconds?: number;
+    audio_listened_seconds?: number;
+    incorrect_answers_count?: number;
+    repeated_explanations_count?: number;
+    mark_studied?: boolean;
   }) {
     return request(`/api/learning/topic/${topicId}/interaction`, {
       method: 'POST',

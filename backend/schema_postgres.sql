@@ -425,6 +425,7 @@ CREATE TABLE IF NOT EXISTS educational_videos (
     status VARCHAR(50) NOT NULL DEFAULT 'completed',
     duration_seconds DECIMAL(6, 2) DEFAULT 0.0,
     video_url TEXT,
+    audio_url TEXT,
     thumbnail_url TEXT,
     script_json TEXT,
     scenes_json TEXT,

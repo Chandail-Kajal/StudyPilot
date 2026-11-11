@@ -2159,11 +2159,19 @@ def generate_heuristic_topic_learning_studio(
             "variables": ["k: Proportionality constant", "ΔS: Net change in driving state", "Δt: Time / Iteration interval"]
         }
     ]
+    try:
+        from video_generator import generate_topic_diagram_svg, detect_visual_archetype
+    except ImportError:
+        from backend.video_generator import generate_topic_diagram_svg, detect_visual_archetype
+
+    arch = detect_visual_archetype(clean_t, clean_s)
+    diag_svg = generate_topic_diagram_svg(clean_t, clean_s, arch)
+
     sec_13_diagrams = {
         "title": f"{clean_t} Operational Architecture",
-        "description": f"Visual breakdown showing Input Stimulus transforming into Stable Output under the rules of {clean_t}.",
+        "description": f"Visual breakdown showing dynamic {arch.replace('_', ' ')} model for {clean_t}.",
         "ascii_art": f"[Input State] ---> | Rule of {clean_t} | ---> [Equilibrium Output]\n         ^                      |\n         |--- Feedback Loop ----|",
-        "diagram_svg": f"<svg viewBox='0 0 620 140' width='100%' height='140'><rect x='20' y='42' width='125' height='52' rx='10' fill='#141E2A' stroke='#0A6C9E' stroke-width='1.5'/><text x='82' y='73' fill='#E8EEF4' font-size='12' font-family='system-ui, sans-serif' text-anchor='middle'>Input Stimulus</text><line x1='145' y1='68' x2='195' y2='68' stroke='#54C2F0' stroke-width='2.5' stroke-dasharray='4'/><polygon points='195,68 188,64 188,72' fill='#54C2F0'/><rect x='195' y='28' width='230' height='80' rx='14' fill='#0A6C9E' stroke='#54C2F0' stroke-width='1.5'/><foreignObject x='195' y='28' width='230' height='80'><div xmlns='http://www.w3.org/1999/xhtml' style='display:flex;align-items:center;justify-content:center;height:100%;text-align:center;color:#ffffff;font-size:13px;font-weight:700;line-height:1.25;padding:6px 14px;font-family:system-ui,sans-serif;word-break:break-word;overflow:hidden;'>{clean_t}</div></foreignObject><line x1='425' y1='68' x2='475' y2='68' stroke='#4CC98A' stroke-width='2.5'/><polygon points='475,68 468,64 468,72' fill='#4CC98A'/><rect x='475' y='42' width='125' height='52' rx='10' fill='#1B8553' stroke='#4CC98A' stroke-width='1.5'/><text x='537' y='73' fill='#ffffff' font-size='12' font-family='system-ui, sans-serif' text-anchor='middle'>Stable Output</text></svg>"
+        "diagram_svg": diag_svg
     }
     sec_13_points = [
         f"Always check dimensional units before substituting values into {clean_t} formulas.",

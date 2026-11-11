@@ -223,7 +223,7 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
   return (
     <div style={{ maxWidth: '1240px', margin: '0 auto', padding: '8px 4px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
       
-      {/* 1. Hero Header Banner with Gradient Glassmorphism */}
+      {/* 1. Hero Header Banner with Clean Slate & Sky Blue Theme */}
       <div
         style={{
           background: 'linear-gradient(135deg, rgba(20, 30, 48, 0.95) 0%, rgba(36, 59, 85, 0.95) 100%)',
@@ -249,7 +249,7 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
           }}
         />
 
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '20px', position: 'relative' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '20px', position: 'relative', zIndex: 1 }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px', flexWrap: 'wrap' }}>
               <span
@@ -314,7 +314,10 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
                 fontSize: '13px',
                 padding: '10px 18px',
                 borderRadius: '10px',
-                boxShadow: '0 4px 14px rgba(2, 132, 199, 0.35)'
+                boxShadow: '0 4px 14px rgba(2, 132, 199, 0.35)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
               }}
             >
               <Icon name="sparkles" size={15} />
@@ -330,7 +333,10 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
                 border: '1px solid rgba(255, 255, 255, 0.15)',
                 fontSize: '13px',
                 padding: '10px 16px',
-                borderRadius: '10px'
+                borderRadius: '10px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
               }}
             >
               <Icon name="refresh" size={14} />
@@ -357,7 +363,7 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
         </div>
       </div>
 
-      {/* 2. Sleek KPI Metrics Cards with Vibrant Gradients */}
+      {/* 2. Sleek KPI Metrics Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px' }}>
         
         {/* Card 1: Completion Rate */}
@@ -683,7 +689,7 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
                         style={{
                           background: isDone ? 'var(--surface2)' : 'var(--surface)',
                           borderRadius: '12px',
-                          border: isDone ? '1px solid var(--line)' : '1px solid var(--line)',
+                          border: '1px solid var(--line)',
                           padding: '14px 18px',
                           display: 'flex',
                           alignItems: 'center',
