@@ -100,6 +100,24 @@ CREATE INDEX IF NOT EXISTS idx_topics_subject ON topics(subject_id);
 CREATE INDEX IF NOT EXISTS idx_topics_unit ON topics(unit_id);
 CREATE INDEX IF NOT EXISTS idx_topics_chapter ON topics(chapter_id);
 
+-- 7.5. topic_lessons
+CREATE TABLE IF NOT EXISTS topic_lessons (
+    id VARCHAR(64) PRIMARY KEY,
+    topic_id VARCHAR(64) NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+    lesson_order INTEGER DEFAULT 1,
+    title VARCHAR(255) NOT NULL,
+    learning_objective TEXT,
+    prerequisites TEXT,
+    key_concepts TEXT,
+    estimated_minutes INTEGER DEFAULT 20,
+    difficulty VARCHAR(30) DEFAULT 'medium',
+    relationship VARCHAR(255),
+    status VARCHAR(50) DEFAULT 'pending',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_lessons_topic ON topic_lessons(topic_id);
+
 -- 8. topic_progress
 CREATE TABLE IF NOT EXISTS topic_progress (
     id VARCHAR(64) PRIMARY KEY,

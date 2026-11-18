@@ -75,6 +75,7 @@ import {
   SubjectModal,
   SettingsModal
 } from '@/components/Modals';
+import { CommandPalette } from '@/components/CommandPalette';
 
 interface ToastItem {
   id: string;
@@ -164,12 +165,69 @@ export default function StudyPilotApp() {
   const [subjectModalOpen, setSubjectModalOpen] = useState(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
 
-  // Theme & Toast
+  // Theme, Accent, Shell & Toast
   const [isDark, setIsDark] = useState(false);
+  const [accentTheme, setAccentTheme] = useState<string>('indigo');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState<boolean>(false);
+  const [cmdOpen, setCmdOpen] = useState<boolean>(false);
+  const [accentPopoverOpen, setAccentPopoverOpen] = useState<boolean>(false);
+  const accentPopoverRef = useRef<HTMLDivElement>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [selectedTopicForTest, setSelectedTopicForTest] = useState<string | null>(null);
   const [activeStudioTopicId, setActiveStudioTopicId] = useState<string | null>(null);
   const [activePracticeTopicId, setActivePracticeTopicId] = useState<string | null>(null);
+
+  // Restore saved Accent Theme & Sidebar preference
+  useEffect(() => {
+    try {
+      const savedAccent = localStorage.getItem('studypilot_accent') || 'indigo';
+      setAccentTheme(savedAccent);
+      document.documentElement.setAttribute('data-accent', savedAccent);
+      const savedCollapsed = localStorage.getItem('studypilot_sidebar_collapsed') === '1';
+      setSidebarCollapsed(savedCollapsed);
+    } catch {}
+  }, []);
+
+  const handleChangeAccent = (accent: string) => {
+    setAccentTheme(accent);
+    document.documentElement.setAttribute('data-accent', accent);
+    try {
+      localStorage.setItem('studypilot_accent', accent);
+    } catch {}
+    setAccentPopoverOpen(false);
+  };
+
+  const handleToggleSidebarCollapse = () => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('studypilot_sidebar_collapsed', next ? '1' : '0');
+      } catch {}
+      return next;
+    });
+  };
+
+  // Global Keyboard Shortcuts (Ctrl+K / Cmd+K for Command Palette) & Popover Click-Outside
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setCmdOpen((prev) => !prev);
+      }
+    };
+    const onClickOutside = (e: MouseEvent) => {
+      if (accentPopoverRef.current && !accentPopoverRef.current.contains(e.target as Node)) {
+        setAccentPopoverOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    document.addEventListener('mousedown', onClickOutside);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('mousedown', onClickOutside);
+    };
+  }, []);
 
   const handleOpenTopicStudio = (topicId: string) => {
     setActiveStudioTopicId(topicId);
@@ -225,9 +283,11 @@ export default function StudyPilotApp() {
       showToast('Please sign in to access your personal dashboard and study records.');
       return;
     }
-    setActiveView(view as ActiveView);
+    const normalizedView = view === 'mock_tests' ? 'mock_config' : view;
+    setActiveView(normalizedView as ActiveView);
+    setMobileNavOpen(false);
     try {
-      window.history.replaceState(null, '', '#' + view);
+      window.history.replaceState(null, '', '#' + normalizedView);
     } catch (e) {}
     window.scrollTo(0, 0);
   };
@@ -917,241 +977,357 @@ export default function StudyPilotApp() {
     );
   }
 
+  const VIEW_LABELS: Record<string, string> = {
+    dashboard: 'Dashboard',
+    exams: 'My Examinations',
+    exam_details: 'Examination Details',
+    upload_syllabus: 'Upload Syllabus',
+    import_preview: 'Syllabus Preview',
+    manage_syllabus: 'Subjects & Syllabus',
+    topic_progress: 'Topic Progress',
+    planner: 'Study Planner',
+    timetable: 'Timetable',
+    ai_classes: 'AI Classes',
+    ai_learning_studio: 'AI Learning Studio',
+    practice: 'Practice & Assessments',
+    flashcards: 'Flashcards Revision',
+    smart_revision: 'Spaced Revision',
+    smart_recovery: 'Smart Recovery Planner',
+    mock_config: 'CBT Mock Tests',
+    test_taking: 'Active Mock Exam',
+    test_results: 'Test Results',
+    test_history: 'Test History',
+    pyp_library: 'Previous-Year Papers',
+    exam_trends: 'Exam Trend Analyzer',
+    predicted_papers: 'AI Predicted Papers',
+    analytics: 'Progress & Analytics',
+    focus: 'Focus Timer',
+    ai: 'AI Study Assistant',
+    account: 'Profile & Settings',
+    today: 'Today',
+    subjects: 'Subjects',
+    insights: 'Insights'
+  };
+
+  const ACCENT_OPTIONS = [
+    { id: 'indigo', label: 'Royal Indigo', color: '#4F46E5' },
+    { id: 'emerald', label: 'Forest Emerald', color: '#059669' },
+    { id: 'ocean', label: 'Ocean Sky', color: '#0284C7' },
+    { id: 'violet', label: 'Deep Violet', color: '#7C3AED' },
+    { id: 'rose', label: 'Crimson Rose', color: '#E11D48' }
+  ];
+
+  const handleStartQuickFocus = () => {
+    setTimerMode('focus');
+    setTimerTotal(25 * 60);
+    setTimerRemaining(25 * 60);
+    navigateTo('focus');
+    showToast('25-minute Focus Session ready!');
+  };
+
   return (
-    <div className="app-container">
+    <div className={`app-container ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+      {/* Mobile Sidebar Backdrop */}
+      {mobileNavOpen && (
+        <div
+          className="mobile-drawer-backdrop"
+          onClick={() => setMobileNavOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
       {/* Navigation Sidebar */}
-      <aside className="side-nav" aria-label="Main Navigation">
-        {/* Brand */}
-        <div className="brand" onClick={() => navigateTo('dashboard')} style={{ cursor: 'pointer' }}>
-          <span className="mark" aria-hidden="true">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M3 11.2 21 3l-4.6 18-4.2-7.1z" />
-            </svg>
-          </span>
-          <span>StudyPilot AI</span>
+      <aside className={`side-nav ${mobileNavOpen ? 'mobile-open' : ''}`} aria-label="Main Navigation">
+        {/* Brand Header & Collapse Toggle */}
+        <div className="side-header">
+          <div className="brand-pro" onClick={() => navigateTo('dashboard')} title="StudyPilot AI Dashboard">
+            <span className="mark" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M3 11.2 21 3l-4.6 18-4.2-7.1z" />
+              </svg>
+            </span>
+            <div className="brand-text-wrap">
+              <div className="brand-title">StudyPilot</div>
+              <div className="brand-subtitle">AI Workspace</div>
+            </div>
+          </div>
+          <button
+            className="iconbtn desktop-collapse-btn"
+            onClick={handleToggleSidebarCollapse}
+            title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            <Icon name="sidebar" size={16} />
+          </button>
         </div>
 
-        {/* Active Exam Mini-Card */}
+        {/* Theme-Adaptive Active Exam Card */}
         {user && activeExam ? (
-          <div className="p-3 mx-1 my-2 rounded-xl bg-slate-900/60 border border-slate-800 text-left">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-primary">Active Exam</span>
+          <div className="sidebar-exam-card">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+              <span style={{ fontSize: '10px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--accent)' }}>
+                Active Goal
+              </span>
               <button
                 onClick={() => navigateTo('exams')}
-                className="text-[10px] text-muted hover:text-white transition-colors"
-                title="Change Exam"
+                style={{ fontSize: '10.5px', fontWeight: 600, color: 'var(--muted)', background: 'none', border: 0, padding: 0 }}
+                title="Switch Examination"
               >
-                Switch
+                Switch &rarr;
               </button>
             </div>
-            <div className="text-xs font-bold text-slate-100 truncate">{activeExam.exam_name}</div>
-            <div className="text-[11px] text-muted capitalize mt-0.5">{activeExam.exam_category}</div>
+            <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {activeExam.exam_name}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '6px', gap: '8px' }}>
+              <div style={{ flex: 1, height: '5px', borderRadius: '99px', background: 'var(--surface)', overflow: 'hidden', border: '1px solid var(--line)' }}>
+                <div
+                  style={{
+                    width: `${Math.min(100, activeExam.readiness_percent || 0)}%`,
+                    height: '100%',
+                    borderRadius: '99px',
+                    background: 'linear-gradient(90deg, var(--accent), var(--good))',
+                    transition: 'width 0.4s ease'
+                  }}
+                />
+              </div>
+              <span className="mono" style={{ fontSize: '10.5px', fontWeight: 700, color: 'var(--ink)' }}>
+                {activeExam.readiness_percent || 0}%
+              </span>
+            </div>
           </div>
         ) : user ? (
-          <div className="p-2.5 mx-1 my-2 rounded-xl bg-slate-900/40 border border-dashed border-slate-800 text-center">
-            <button onClick={() => navigateTo('exams')} className="text-xs text-primary font-semibold hover:underline">
-              + Select / Add Exam
+          <div className="sidebar-exam-card" style={{ textAlign: 'center', borderStyle: 'dashed' }}>
+            <button onClick={() => navigateTo('exams')} style={{ fontSize: '12px', color: 'var(--accent)', fontWeight: 700, background: 'none', border: 0 }}>
+              + Add Target Exam
             </button>
           </div>
-        ) : (
-          <div className="p-2.5 mx-1 my-2 rounded-xl bg-slate-900/40 border border-dashed border-slate-800 text-center">
-            <button
-              onClick={() => {
-                setAuthInitialMode('login');
-                setAuthModalOpen(true);
-              }}
-              className="text-xs text-primary font-semibold hover:underline flex items-center justify-center gap-1.5 w-full"
-            >
-              <span>🔒</span>
-              <span>Sign In to Access</span>
-            </button>
-          </div>
-        )}
+        ) : null}
 
-        {/* Navigation Categories */}
-        <div className="flex-1 overflow-y-auto space-y-3 py-2">
-          {/* 1. Dashboard */}
-          <div>
-            <button
-              className="navbtn"
-              aria-current={activeView === 'dashboard' ? 'page' : undefined}
-              onClick={() => navigateTo('dashboard')}
-            >
-              <Icon name="home" size={18} />
-              <span>Dashboard</span>
-            </button>
+        {/* Grouped Navigation Categories */}
+        <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '2px', padding: '2px 0 8px' }}>
+          <div className="nav-section-title">Workspace</div>
 
-            {/* 2. My Examinations */}
-            <button
-              className="navbtn"
-              aria-current={activeView === 'exams' || activeView === 'exam_details' ? 'page' : undefined}
-              onClick={() => navigateTo('exams')}
-            >
-              <Icon name="award" size={18} />
-              <span>My Examinations</span>
-              {allExams.length > 0 && (
-                <span className="badge badge-outline text-[10px] ml-auto">{allExams.length}</span>
-              )}
-            </button>
+          <button
+            className="navbtn"
+            aria-current={activeView === 'dashboard' ? 'page' : undefined}
+            onClick={() => navigateTo('dashboard')}
+            title="Dashboard"
+          >
+            <Icon name="home" size={18} />
+            <span className="navbtn-label">Dashboard</span>
+          </button>
 
-            {/* 3. Study Planner */}
-            <button
-              className="navbtn"
-              aria-current={activeView === 'planner' || activeView === 'smart_recovery' ? 'page' : undefined}
-              onClick={() => navigateTo('planner')}
-            >
-              <Icon name="calendar" size={18} />
-              <span>Study Planner</span>
-            </button>
+          <button
+            className="navbtn"
+            aria-current={activeView === 'exams' || activeView === 'exam_details' ? 'page' : undefined}
+            onClick={() => navigateTo('exams')}
+            title="My Examinations"
+          >
+            <Icon name="award" size={18} />
+            <span className="navbtn-label">My Examinations</span>
+            {allExams.length > 0 && (
+              <span className="badge badge-outline navbtn-badge" style={{ marginLeft: 'auto', fontSize: '10px' }}>{allExams.length}</span>
+            )}
+          </button>
 
-            {/* 4. Timetable */}
-            <button
-              className="navbtn"
-              aria-current={activeView === 'timetable' ? 'page' : undefined}
-              onClick={() => navigateTo('timetable')}
-            >
-              <Icon name="clock" size={18} />
-              <span className="font-semibold">Timetable</span>
-              <span className="badge badge-primary text-[10px] ml-auto">Daily/Weekly</span>
-            </button>
+          <button
+            className="navbtn"
+            aria-current={activeView === 'planner' || activeView === 'smart_recovery' ? 'page' : undefined}
+            onClick={() => navigateTo('planner')}
+            title="Study Planner"
+          >
+            <Icon name="calendar" size={18} />
+            <span className="navbtn-label">Study Planner</span>
+          </button>
 
-            {/* 5. AI Classes */}
-            <button
-              className="navbtn"
-              aria-current={activeView === 'ai_classes' || activeView === 'ai_learning_studio' ? 'page' : undefined}
-              onClick={() => navigateTo('ai_classes')}
-            >
-              <Icon name="sparkles" size={18} />
-              <span className="font-semibold">AI Classes</span>
-              <span className="badge badge-primary text-[10px] ml-auto">Live Studio</span>
-            </button>
+          <button
+            className="navbtn"
+            aria-current={activeView === 'timetable' ? 'page' : undefined}
+            onClick={() => navigateTo('timetable')}
+            title="Timetable"
+          >
+            <Icon name="clock" size={18} />
+            <span className="navbtn-label">Timetable</span>
+            <span className="badge badge-primary navbtn-badge" style={{ marginLeft: 'auto', fontSize: '10px' }}>Schedule</span>
+          </button>
 
-            {/* 6. Subjects & Syllabus */}
-            <button
-              className="navbtn"
-              aria-current={activeView === 'manage_syllabus' || activeView === 'upload_syllabus' || activeView === 'import_preview' || activeView === 'topic_progress' ? 'page' : undefined}
-              onClick={() => navigateTo('manage_syllabus')}
-            >
-              <Icon name="layers" size={18} />
-              <span>Subjects & Syllabus</span>
-              {previewState && (
-                <span className="badge badge-warning text-[10px] ml-auto">Pending</span>
-              )}
-            </button>
+          <div className="nav-section-title">AI Learning</div>
 
-            {/* 7. Practice & Assessments */}
-            <button
-              className="navbtn"
-              aria-current={activeView === 'practice' || activeView === 'flashcards' ? 'page' : undefined}
-              onClick={() => navigateTo('practice')}
-            >
-              <Icon name="check-circle" size={18} />
-              <span>Practice & Assessments</span>
-            </button>
+          <button
+            className="navbtn"
+            aria-current={activeView === 'ai_classes' || activeView === 'ai_learning_studio' ? 'page' : undefined}
+            onClick={() => navigateTo('ai_classes')}
+            title="AI Classes & Video Studio"
+          >
+            <Icon name="sparkles" size={18} />
+            <span className="navbtn-label">AI Classes</span>
+            <span className="badge badge-primary navbtn-badge" style={{ marginLeft: 'auto', fontSize: '10px' }}>Studio</span>
+          </button>
 
-            {/* 8. Mock Tests */}
-            <button
-              className="navbtn"
-              aria-current={activeView === 'mock_config' || activeView === 'test_taking' || activeView === 'test_results' || activeView === 'test_history' ? 'page' : undefined}
-              onClick={() => navigateTo('mock_config')}
-            >
-              <Icon name="play" size={18} />
-              <span>Mock Tests</span>
-              <span className="badge badge-outline text-[10px] ml-auto">CBT</span>
-            </button>
+          <button
+            className="navbtn"
+            aria-current={activeView === 'manage_syllabus' || activeView === 'upload_syllabus' || activeView === 'import_preview' || activeView === 'topic_progress' ? 'page' : undefined}
+            onClick={() => navigateTo('manage_syllabus')}
+            title="Subjects & Syllabus"
+          >
+            <Icon name="layers" size={18} />
+            <span className="navbtn-label">Subjects & Syllabus</span>
+            {previewState && (
+              <span className="badge badge-warning navbtn-badge" style={{ marginLeft: 'auto', fontSize: '10px' }}>Pending</span>
+            )}
+          </button>
 
-            {/* 9. Previous-Year Papers */}
-            <button
-              className="navbtn"
-              aria-current={activeView === 'pyp_library' || activeView === 'exam_trends' || activeView === 'predicted_papers' ? 'page' : undefined}
-              onClick={() => navigateTo('pyp_library')}
-            >
-              <Icon name="file-text" size={18} />
-              <span>Previous-Year Papers</span>
-            </button>
+          <button
+            className="navbtn"
+            aria-current={activeView === 'practice' || activeView === 'flashcards' || activeView === 'smart_revision' ? 'page' : undefined}
+            onClick={() => navigateTo('practice')}
+            title="Practice & Assessments"
+          >
+            <Icon name="check-circle" size={18} />
+            <span className="navbtn-label">Practice & Drills</span>
+          </button>
 
-            {/* 10. Progress & Analytics */}
-            <button
-              className="navbtn"
-              aria-current={activeView === 'analytics' ? 'page' : undefined}
-              onClick={() => navigateTo('analytics')}
-            >
-              <Icon name="bar-chart" size={18} />
-              <span>Progress & Analytics</span>
-            </button>
+          <button
+            className="navbtn"
+            aria-current={activeView === 'ai' ? 'page' : undefined}
+            onClick={() => navigateTo('ai')}
+            title="AI Study Assistant"
+          >
+            <Icon name="robot" size={18} />
+            <span className="navbtn-label">AI Tutor Chat</span>
+          </button>
 
-            {/* 11. AI Study Assistant */}
-            <button
-              className="navbtn"
-              aria-current={activeView === 'ai' ? 'page' : undefined}
-              onClick={() => navigateTo('ai')}
-            >
-              <Icon name="sparkles" size={18} />
-              <span>AI Study Assistant</span>
-            </button>
+          <div className="nav-section-title">Exam Mastery</div>
 
-            {/* 12. Profile & Settings */}
-            <button
-              className="navbtn"
-              aria-current={activeView === 'account' ? 'page' : undefined}
-              onClick={() => navigateTo('account')}
-            >
-              <Icon name="user" size={18} />
-              <span>Profile & Settings</span>
-            </button>
-          </div>
+          <button
+            className="navbtn"
+            aria-current={activeView === 'mock_config' || activeView === 'test_taking' || activeView === 'test_results' || activeView === 'test_history' ? 'page' : undefined}
+            onClick={() => navigateTo('mock_config')}
+            title="CBT Mock Tests"
+          >
+            <Icon name="play" size={18} />
+            <span className="navbtn-label">Mock Tests</span>
+            <span className="badge badge-outline navbtn-badge" style={{ marginLeft: 'auto', fontSize: '10px' }}>CBT</span>
+          </button>
+
+          <button
+            className="navbtn"
+            aria-current={activeView === 'pyp_library' || activeView === 'exam_trends' || activeView === 'predicted_papers' ? 'page' : undefined}
+            onClick={() => navigateTo('pyp_library')}
+            title="Previous-Year Papers"
+          >
+            <Icon name="file-text" size={18} />
+            <span className="navbtn-label">Past Papers & AI</span>
+          </button>
+
+          <button
+            className="navbtn"
+            aria-current={activeView === 'analytics' ? 'page' : undefined}
+            onClick={() => navigateTo('analytics')}
+            title="Progress & Analytics"
+          >
+            <Icon name="bar-chart" size={18} />
+            <span className="navbtn-label">Analytics</span>
+          </button>
+
+          <div className="nav-section-title">System</div>
+
+          <button
+            className="navbtn"
+            aria-current={activeView === 'account' ? 'page' : undefined}
+            onClick={() => navigateTo('account')}
+            title="Profile & Settings"
+          >
+            <Icon name="user" size={18} />
+            <span className="navbtn-label">Profile & Settings</span>
+          </button>
         </div>
 
         {/* Cloud Sync Status */}
-        <div className="cloud-status-badge mt-auto">
+        <div className="cloud-status-badge" style={{ marginTop: 'auto' }} title={syncStatus === 'synced' ? 'Database Connected' : syncStatus === 'syncing' ? 'Syncing...' : 'Local'}>
           <span
             style={{
               width: '8px',
               height: '8px',
               borderRadius: '50%',
+              flexShrink: 0,
+              boxShadow: syncStatus === 'synced' ? '0 0 8px var(--good)' : 'none',
               background: syncStatus === 'synced' ? 'var(--good)' : syncStatus === 'syncing' ? 'var(--amber)' : 'var(--muted)'
             }}
           />
-          <span>{syncStatus === 'synced' ? 'Database Connected' : syncStatus === 'syncing' ? 'Syncing...' : 'Local'}</span>
+          <span className="cloud-status-text">
+            {syncStatus === 'synced' ? 'Live Sync Active' : syncStatus === 'syncing' ? 'Syncing...' : 'Local Workspace'}
+          </span>
         </div>
       </aside>
 
       {/* Main Content Area */}
       <main className="main-content">
-        {/* Top Header Bar */}
-        <header className="top-bar">
-          <div className="mbrand">
-            <span className="mark" aria-hidden="true" style={{ width: '28px', height: '28px', borderRadius: '8px' }}>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M3 11.2 21 3l-4.6 18-4.2-7.1z" />
-              </svg>
-            </span>
-            StudyPilot
+        {/* Glassmorphic Sticky Top Command Bar */}
+        <header className="top-bar-pro">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+            <button
+              className="tbtn iconly mobile-menu-btn"
+              style={{ display: 'none', height: '38px', width: '38px' }}
+              onClick={() => setMobileNavOpen(true)}
+              aria-label="Open navigation menu"
+            >
+              <Icon name="menu" size={18} />
+            </button>
+
+            <div className="breadcrumb-pill">
+              <span style={{ opacity: 0.7 }} className="hidden md:inline">StudyPilot</span>
+              <span style={{ opacity: 0.4 }} className="hidden md:inline">/</span>
+              <strong>{VIEW_LABELS[activeView] || 'Workspace'}</strong>
+            </div>
           </div>
 
-          {/* Running Live Focus Timer Chip */}
-          {timerRunning && activeView !== 'focus' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'nowrap' }}>
+            {/* Interactive Command Palette Trigger */}
             <button
-              className="tbtn chiptimer"
-              onClick={() => navigateTo('focus')}
-              aria-label="Active focus session"
+              className="cmd-trigger"
+              onClick={() => setCmdOpen(true)}
+              title="Open Quick Command Palette (Ctrl + K)"
             >
-              <Icon name="play" size={13} />
-              <span>{timerMode === 'focus' ? 'Focus ' : 'Break '}{timerMMSS}</span>
+              <Icon name="search" size={15} />
+              <span className="cmd-trigger-label">Quick jump...</span>
+              <kbd className="cmd-trigger-kbd">Ctrl K</kbd>
             </button>
-          )}
 
-          {/* Active Exam Selector in Header */}
-          {allExams.length > 0 && (
-            <div className="hidden sm:flex items-center gap-2">
-              <span className="text-xs text-muted font-medium">Exam:</span>
+            {/* Running Live Focus Timer Chip or Quick Focus Launcher */}
+            {timerRunning && activeView !== 'focus' ? (
+              <button
+                className="tbtn chiptimer"
+                style={{ height: '38px' }}
+                onClick={() => navigateTo('focus')}
+                aria-label="Active focus session"
+              >
+                <Icon name="play" size={13} />
+                <span>{timerMode === 'focus' ? 'Focus ' : 'Break '}{timerMMSS}</span>
+              </button>
+            ) : activeView !== 'focus' ? (
+              <button
+                className="tbtn hidden lg:inline-flex"
+                style={{ height: '38px', fontSize: '13px', padding: '0 12px' }}
+                onClick={handleStartQuickFocus}
+                title="Start a 25-minute deep-work Pomodoro session"
+              >
+                <Icon name="zap" size={15} style={{ color: 'var(--amber)' }} />
+                <span>Focus</span>
+              </button>
+            ) : null}
+
+            {/* Theme-Adaptive Active Exam Selector */}
+            {allExams.length > 0 && (
               <select
                 value={activeExam?.id || ''}
                 onChange={(e) => {
                   const selected = allExams.find(ex => ex.id === e.target.value);
                   if (selected) setActiveExam(selected);
                 }}
-                className="text-xs font-semibold bg-slate-900 border border-slate-700 rounded-lg py-1 px-2.5 text-slate-200"
+                aria-label="Switch active exam"
+                className="exam-select-pro hidden sm:block"
               >
                 {allExams.map(ex => (
                   <option key={ex.id} value={ex.id}>
@@ -1159,55 +1335,95 @@ export default function StudyPilotApp() {
                   </option>
                 ))}
               </select>
+            )}
+
+            {/* Global Accent Palette Switcher */}
+            <div ref={accentPopoverRef} style={{ position: 'relative' }}>
+              <button
+                className="tbtn iconly"
+                style={{ height: '38px', width: '38px' }}
+                onClick={() => setAccentPopoverOpen((o) => !o)}
+                aria-label="Choose workspace accent color"
+                title="Customize accent palette"
+              >
+                <Icon name="palette" size={17} style={{ color: 'var(--accent)' }} />
+              </button>
+              {accentPopoverOpen && (
+                <div className="accent-popover">
+                  <div style={{ fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--muted)', padding: '2px 8px 8px' }}>
+                    Workspace Accent
+                  </div>
+                  {ACCENT_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.id}
+                      className={`accent-swatch-btn ${accentTheme === opt.id ? 'active' : ''}`}
+                      onClick={() => handleChangeAccent(opt.id)}
+                    >
+                      <span
+                        style={{
+                          width: '14px',
+                          height: '14px',
+                          borderRadius: '50%',
+                          background: opt.color,
+                          flexShrink: 0,
+                          boxShadow: '0 0 0 2px var(--surface), 0 0 0 3px var(--line)'
+                        }}
+                      />
+                      <span>{opt.label}</span>
+                      {accentTheme === opt.id && (
+                        <span style={{ marginLeft: 'auto' }}>
+                          <Icon name="check" size={14} />
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
-          )}
 
-          {/* Theme switcher */}
-          <button
-            className="tbtn iconly"
-            onClick={toggleTheme}
-            aria-label="Toggle dark/light theme"
-          >
-            <Icon name={isDark ? 'sun' : 'moon'} size={18} />
-          </button>
-
-          {/* Settings modal trigger */}
-          <button
-            className="tbtn iconly"
-            onClick={() => setSettingsModalOpen(true)}
-            aria-label="Open settings"
-          >
-            <Icon name="gear" size={18} />
-          </button>
-
-          {/* Auth / My Account Button */}
-          {user ? (
+            {/* Dark/Light Theme Switcher */}
             <button
-              className="user-pill-btn"
-              onClick={() => navigateTo('account')}
-              title={`Account: ${user.name} (${user.email})`}
+              className="tbtn iconly"
+              style={{ height: '38px', width: '38px' }}
+              onClick={toggleTheme}
+              aria-label="Toggle dark/light theme"
+              title={isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
             >
-              <div className="user-avatar-circle">
-                {getInitials(user.name)}
-              </div>
-              <span style={{ maxWidth: '110px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {user.name.split(' ')[0]}
-              </span>
+              <Icon name={isDark ? 'sun' : 'moon'} size={17} />
             </button>
-          ) : (
+
+            {/* Settings Modal Trigger */}
             <button
-              className="btn btn-primary btn-sm"
-              onClick={() => {
-                setAuthInitialMode('login');
-                setAuthModalOpen(true);
-              }}
+              className="tbtn iconly hidden sm:inline-flex"
+              style={{ height: '38px', width: '38px' }}
+              onClick={() => setSettingsModalOpen(true)}
+              aria-label="Open settings"
+              title="Quick Settings"
             >
-              <Icon name="user" size={14} /> Sign In
+              <Icon name="gear" size={17} />
             </button>
-          )}
+
+            {/* User Profile Pill */}
+            {user && (
+              <button
+                className="user-pill-btn"
+                style={{ height: '38px', padding: '0 10px 0 7px' }}
+                onClick={() => navigateTo('account')}
+                title={`Account: ${user.name} (${user.email})`}
+              >
+                <div className="user-avatar-circle">
+                  {getInitials(user.name)}
+                </div>
+                <span className="hidden md:inline" style={{ maxWidth: '100px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '13px' }}>
+                  {user.name.split(' ')[0]}
+                </span>
+              </button>
+            )}
+          </div>
         </header>
 
-        {/* Dynamic Views: Authenticated User Workspace */}
+        {/* Dynamic Views: Authenticated User Workspace with Smooth Entrance */}
+        <div key={activeView} className="view-stage">
         {activeView === 'dashboard' && (
               <DashboardView
                 user={user}
@@ -1617,7 +1833,29 @@ export default function StudyPilotApp() {
         {activeView === 'insights' && (
           <InsightsView plan={plan} />
         )}
+        </div>
       </main>
+
+      {/* Interactive Command Palette (Ctrl + K) */}
+      <CommandPalette
+        open={cmdOpen}
+        onClose={() => setCmdOpen(false)}
+        onNavigate={navigateTo}
+        allExams={allExams}
+        activeExam={activeExam}
+        onSelectExam={(ex) => {
+          handleSelectExam(ex);
+          showToast(`Switched active exam to ${ex.exam_name}`);
+        }}
+        onStartQuickFocus={handleStartQuickFocus}
+        isDark={isDark}
+        toggleTheme={toggleTheme}
+        accentTheme={accentTheme}
+        onChangeAccent={(acc) => {
+          handleChangeAccent(acc);
+          showToast(`Workspace accent updated to ${acc}`);
+        }}
+      />
 
       {/* Global Modals */}
       <AuthModal

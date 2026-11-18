@@ -40,6 +40,19 @@ StudyPilot AI is an advanced, production-grade learning management and exam prep
    - **Test History**: Comprehensive log of previous test attempts and scorecard review.
    - **Performance Analytics**: Readiness index meter, subject proficiency bars, mastery distribution, and weak spots.
 
+## Backend Architecture
+
+The backend is organized into routing, service, repository, model, schema, and shared layers:
+
+- `backend/main.py` configures the FastAPI application and mounts feature routers.
+- `backend/routers/` groups endpoints by account, AI, exams/syllabus, learning, and study features.
+- `backend/services/` contains the corresponding feature workflows.
+- `backend/repositories/` provides SQLAlchemy ORM repository operations and a compatibility boundary for existing SQL queries.
+- `backend/models/` reflects the relational schema into SQLAlchemy ORM classes; `backend/schemas.py` contains API request models.
+- `backend/shared/` contains database/session configuration and shared utilities.
+
+Existing API paths and payloads are preserved. Legacy SQL-backed workflows use the repository compatibility boundary while ORM repository operations are introduced, allowing those queries to be migrated without changing endpoint behavior.
+
 ---
 
 ## 👥 Documented Demo Accounts

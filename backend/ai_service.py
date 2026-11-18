@@ -102,6 +102,7 @@ async def call_openai(prompt: str, api_key: str, system_instruction: str = "", j
 
 async def call_llm(prompt: str, api_key: Optional[str] = None, system_instruction: str = "", json_mode: bool = False) -> Optional[str]:
     """Universal dispatcher: Gemini (Primary) -> Groq (Secondary) -> Ollama (Local) -> Heuristics."""
+
     key = get_api_key(api_key)
     if key and is_openai_key(key):
         try:
@@ -1900,11 +1901,51 @@ async def generate_interactive_topic_content(
                 "correct_index": 2,
                 "explanation": "Details the subtle difference tested."
             }}
+        ],
+        "topic_introduction": "Engaging, thorough introduction specifically covering {topic_name} in {subject_name}",
+        "learning_objectives": ["Specific conceptual objective 1", "Specific objective 2", "Specific objective 3", "Specific objective 4"],
+        "simple_explanation": "Intuitive, beginner-friendly explanation using a vivid relatable analogy (no abstract jargon)",
+        "detailed_explanation": "In-depth academic breakdown explaining the underlying theory, mechanisms, and governing rules",
+        "important_definitions": [
+            {{"term": "Core Term 1", "definition": "Precise academic definition"}},
+            {{"term": "Boundary Constraint", "definition": "Operational limits and invariant rules"}}
+        ],
+        "step_by_step_examples": [
+            {{
+                "title": "Classic Examination Problem",
+                "problem": "Specific numerical or conceptual problem statement...",
+                "steps": ["Step 1: Parameter extraction and unit check", "Step 2: Formula / rule application", "Step 3: Evaluation and boundary verification"],
+                "solution": "Final validated answer with complete explanation"
+            }}
+        ],
+        "real_world_applications": [
+            "Concrete real-world / industry application 1",
+            "Concrete real-world / technology application 2"
+        ],
+        "important_formulas": [
+            {{
+                "name": "Core Governing Expression",
+                "formula": "LaTeX formula or clean pseudocode",
+                "description": "Relates the active variables and boundary constraints",
+                "variables": ["var1: Meaning and SI units", "var2: Parameter description"]
+            }}
+        ],
+        "points_to_remember": [
+            "Crucial examination point 1",
+            "Crucial examination point 2",
+            "Crucial examination point 3"
+        ],
+        "topic_summary": "Comprehensive 3-4 sentence conclusion synthesizing the entire topic",
+        "faqs": [
+            {{"question": "Common student misconception or exam pitfall", "answer": "Clear, concise clarification"}}
         ]
     }}
     """
 
     llm_output = await call_llm(prompt, api_key=api_key, system_instruction=system_instruction, json_mode=True)
+    print("[Info]-> llm_output")
+    print(llm_output)    
+
     if llm_output:
         try:
             # Clean markdown codeblocks if present
@@ -1953,19 +1994,29 @@ def generate_heuristic_topic_learning_studio(
 
     clean_t = topic_name.strip()
     clean_s = subject_name.strip()
+    t_lower = clean_t.lower()
+    s_lower = clean_s.lower()
 
-    if is_school:
-        summary = f"{clean_t} is an exciting and fundamental topic in {clean_s}. It helps us understand how things work in the world around us through easy observations and clear rules."
-        ex1 = f"Imagine baking a cake or riding a bicycle: {clean_t} operates just like a step-by-step recipe where every part has a special job to do."
-        analogy1 = "Think of it like a team of players on a field: each rule works together so the entire system plays smoothly."
-    elif is_advanced:
-        summary = f"{clean_t} represents a foundational theoretical and applied construct within {clean_s}, governing formal state transitions, invariant constraints, and optimization boundaries."
-        ex1 = f"In large-scale production architectures and scientific models, {clean_t} dictates critical latency boundaries and reliability guarantees."
-        analogy1 = "Consider it as the protocol layer in distributed computing: strict contractual interfaces maintaining coherence across heterogeneous nodes."
+    is_cs = any(k in t_lower or k in s_lower for k in ["linked list", "tree", "stack", "queue", "graph", "data structure", "algorithm", "sorting", "searching", "hash", "pointer", "memory", "recursion", "array", "database", "sql"])
+    is_math = any(k in t_lower or k in s_lower for k in ["calculus", "polynomial", "matrix", "integral", "derivative", "probability", "algebra", "geometry", "trigonometry", "equation", "function", "limit", "vector"])
+    is_science = any(k in t_lower or k in s_lower for k in ["physics", "chemistry", "biology", "force", "energy", "motion", "thermodynamic", "wave", "atom", "molecule", "cell", "reflex", "nervous"])
+
+    if is_cs:
+        summary = f"{clean_t} is a core foundational concept in {clean_s} that governs how data elements are structured, referenced, and traversed efficiently in computer memory."
+        ex1 = f"In music streaming playlists and web browser navigation, {clean_t} enables constant-time insertions and smooth forward/backward element transitions."
+        analogy1 = "Think of a train where each carriage is coupled to the next: each node stores cargo (its data payload) and a coupler (a memory pointer reference to the adjacent carriage)."
+    elif is_math:
+        summary = f"{clean_t} is a critical mathematical pillar in {clean_s} essential for formulating algebraic models, calculating rates of change, and solving entrance exam problems."
+        ex1 = f"In engineering trajectory planning and economic modeling, {clean_t} models rate transitions, inflection points, and boundary limits."
+        analogy1 = "Like looking at a car speedometer: while total distance represents accumulated values, {clean_t} provides the exact instantaneous slope and behavior at any given coordinate."
+    elif is_science:
+        summary = f"{clean_t} is a foundational scientific mechanism in {clean_s} that explains state transformations under physical, chemical, and biological conservation laws."
+        ex1 = f"In physiological neural reflexes and physical systems, {clean_t} explains how an initial stimulus propagates through pathways to produce an equilibrium response."
+        analogy1 = "Think of a smart thermostat: an active sensor detects an input deviation, triggering an exact counter-balancing mechanism to preserve equilibrium."
     else:
-        summary = f"{clean_t} is a core high-yield topic in {clean_s} for {exam_name}. Mastering its theoretical principles, typical edge cases, and problem-solving patterns is essential for competitive success."
-        ex1 = f"A classic real-world scenario involves balance and rate of exchange: where {clean_t} governs efficiency limits and resource equilibrium."
-        analogy1 = "Think of it as a well-calibrated gearbox: adjusting input variables directly dictates output torque and throughput."
+        summary = f"{clean_t} is an essential academic subject area in {clean_s} for {exam_name}, developing structured analytical reasoning and core conceptual mastery."
+        ex1 = f"In real-world policy and operational decision making, {clean_t} defines the framework for balancing trade-offs and evaluating measurable outcomes."
+        analogy1 = "Think of it as the foundation of a building: establishing clear structural rules ensures that every subsequent concept stands firmly."
 
     sections = [
         {
@@ -2128,37 +2179,112 @@ def generate_heuristic_topic_learning_studio(
     ]
     sec_13_simple = f"In simple terms, {clean_t} functions like a well-balanced system: when you modify an input factor, the governing rules of {clean_s} dynamically produce a balanced result. " + analogy1
     sec_13_detailed = f"From a rigorous academic standpoint, {clean_t} establishes the foundational relationships governing active variables in {clean_s}. It determines state transformations under operational load, boundary constraints, and conservation laws. Analyzing any problem requires decomposing the system into invariant quantities (which remain preserved) and dynamic variables (which change systematically)."
-    sec_13_defs = [
-        {"term": f"{clean_t}", "definition": f"The governing concept in {clean_s} that defines the state, transformation, and fundamental behavior of its active elements."},
-        {"term": "Boundary Condition", "definition": "The limiting physical, mathematical, or logical constraints within which the governing laws operate."},
-        {"term": "Invariant Constraint", "definition": "A fundamental quantity or parity (such as energy, charge, or continuity) that remains conserved throughout the transformation."}
-    ]
-    sec_13_examples = [
-        {
-            "title": f"Standard {clean_t} Problem",
-            "problem": f"A system in {clean_s} is subject to operational stimulus governed by {clean_t}. Determine the resulting equilibrium state.",
-            "steps": [
-                "Step 1: Extract and list all given parameters, initial conditions, and units.",
-                f"Step 2: Identify and write down the governing formula for {clean_t}.",
-                "Step 3: Substitute the known values and simplify the expressions algebraically.",
-                "Step 4: Check dimensional consistency and test boundary limits to confirm the answer."
-            ],
-            "solution": f"The equilibrium state is uniquely determined and verified against the boundary constraints of {clean_t}."
-        }
-    ]
-    sec_13_apps = [
-        ex1,
-        f"Practical engineering and systems design: optimizing resource throughput in {clean_s}.",
-        f"Modern research & diagnostics: modeling state changes and prediction curves in {clean_t}."
-    ]
-    sec_13_formulas = [
-        {
-            "name": f"Core Equation of {clean_t}",
-            "formula": f"Rate({clean_t}) = k \\cdot \\frac{{\\Delta S}}{{\\Delta t}}",
-            "description": "Relates the rate of system transformation to the active driving gradient.",
-            "variables": ["k: Proportionality constant", "ΔS: Net change in driving state", "Δt: Time / Iteration interval"]
-        }
-    ]
+    if is_cs:
+        sec_13_defs = [
+            {"term": f"{clean_t}", "definition": f"A foundational data structure in {clean_s} where elements are arranged sequentially or via pointer references."},
+            {"term": "Pointer / Reference", "definition": "A variable holding the direct memory address of another node or structure in memory."},
+            {"term": "Sentinel / Null Boundary", "definition": "A marker indicating the end of a chain (e.g. NULL pointer), preventing memory faults and infinite loops."}
+        ]
+        sec_13_examples = [
+            {
+                "title": f"Pointer Traversal and Head Insertion in {clean_t}",
+                "problem": f"Given a {clean_t} with existing nodes [12 -> 45 -> 99 -> NULL], trace the steps to insert a new node with value 7 at the beginning (Head).",
+                "steps": [
+                    "Step 1: Allocate memory for the new node and assign its value payload (newNode.val = 7).",
+                    "Step 2: Point the newNode's next reference to the current Head (newNode.next = Head).",
+                    "Step 3: Update the Head pointer to reference the new node (Head = newNode).",
+                    "Step 4: Verify boundary conditions: check if the original list was empty (Head == NULL) and confirm no nodes were orphaned."
+                ],
+                "solution": "The new list order is [7 -> 12 -> 45 -> 99 -> NULL]. The operation completes in strictly O(1) constant time without shifting any elements in memory."
+            }
+        ]
+        sec_13_formulas = [
+            {
+                "name": f"Time & Space Complexity Bounds for {clean_t}",
+                "formula": "T_{insert}(Head) = O(1), \\quad T_{access}(i) = O(N), \\quad S_{space} = O(N)",
+                "description": "Prepend operations achieve O(1) constant time via pointer assignment, while random access requires O(N) linear sequential traversal.",
+                "variables": ["N: Total number of active elements", "O(1): Constant operational cost", "O(N): Linear traversal complexity"]
+            }
+        ]
+    elif is_math:
+        sec_13_defs = [
+            {"term": f"{clean_t}", "definition": f"The governing mathematical construct in {clean_s} mapping relationships between inputs and outputs."},
+            {"term": "Boundary Constraint", "definition": "The limiting interval or domain constraints within which the governing mathematical law is valid."},
+            {"term": "Convergence & Continuity", "definition": "The condition ensuring smooth transformations without asymptotic singularities or undefined discontinuities."}
+        ]
+        sec_13_examples = [
+            {
+                "title": f"Evaluating Analytical Solutions for {clean_t}",
+                "problem": f"Given a continuous system in {clean_s} governed by {clean_t}, find the equilibrium state satisfying initial boundary limits.",
+                "steps": [
+                    "Step 1: Extract and list all given variables, known boundary conditions, and domain limits.",
+                    f"Step 2: State the primary governing formula for {clean_t}.",
+                    "Step 3: Perform algebraic substitution and simplify intermediate expressions systematically.",
+                    "Step 4: Test boundary values (such as zero and extreme limits) to verify stability and correctness."
+                ],
+                "solution": f"The unique analytical solution satisfies all boundary conditions and proves stable across the defined domain."
+            }
+        ]
+        sec_13_formulas = [
+            {
+                "name": f"Governing Analytical Expression for {clean_t}",
+                "formula": "f(x) = \\sum_{i=0}^{n} a_i x^i \\quad \\text{with} \\quad \\frac{df}{dx} = \\lim_{h \\to 0} \\frac{f(x+h) - f(x)}{h}",
+                "description": "Formulates the foundational mathematical law governing functional transformation and slope.",
+                "variables": ["x: Independent variable", "a_i: Domain coefficients", "h: Incremental delta"]
+            }
+        ]
+    else:
+        sec_13_defs = [
+            {"term": f"{clean_t}", "definition": f"The core concept in {clean_s} that explains the state, transformation, and fundamental behavior of its active elements."},
+            {"term": "Boundary Condition", "definition": "The limiting physical or operational constraints within which the governing rules apply."},
+            {"term": "Invariant Property", "definition": "A fundamental quantity or structural rule that remains preserved throughout all state transitions."}
+        ]
+        sec_13_examples = [
+            {
+                "title": f"Standard Examination Application on {clean_t}",
+                "problem": f"A system in {clean_s} operates under the rules of {clean_t}. Determine the resulting output given standard baseline inputs.",
+                "steps": [
+                    "Step 1: Identify given parameters, initial conditions, and units.",
+                    f"Step 2: State the governing rule or principle for {clean_t}.",
+                    "Step 3: Execute the transformation sequence step-by-step.",
+                    "Step 4: Verify that the final answer is logically consistent with known boundary limits."
+                ],
+                "solution": f"The resulting equilibrium state is verified and complies with the governing rules of {clean_t}."
+            }
+        ]
+        sec_13_formulas = [
+            {
+                "name": f"Governing Relationship for {clean_t}",
+                "formula": "\\Delta Y = k \\cdot f(\\Delta X)",
+                "description": "Quantifies the resulting output response as a function of the driving input gradient.",
+                "variables": ["k: Proportionality factor", "ΔX: Driving input change", "ΔY: Resulting response"]
+            }
+        ]
+
+    if is_cs:
+        sec_13_apps = [
+            f"Optimizing data storage and memory allocation in operating systems and browsers using {clean_t}.",
+            f"Implementing undo/redo stacks, cache buffers, and real-time event dispatchers with {clean_t}.",
+            f"Powering high-throughput database index retrieval and distributed ledger tracking."
+        ]
+    elif is_math:
+        sec_13_apps = [
+            f"Predicting continuous rates of change and equilibrium states in financial modeling using {clean_t}.",
+            f"Optimizing multi-variable trajectories and error boundaries in machine learning algorithms.",
+            f"Simulating physical coordinate systems and spatial rendering in 3D game engines."
+        ]
+    elif is_science:
+        sec_13_apps = [
+            f"Measuring thermodynamic efficiency and energy conservation in industrial chemical reactors.",
+            f"Analyzing cellular reaction rates and metabolic pathways in molecular biology.",
+            f"Designing resilient aerospace structures by computing stress distribution under variable loads."
+        ]
+    else:
+        sec_13_apps = [
+            f"Real-world application of {clean_t} to model structural workflows and operational systems in {clean_s}.",
+            f"Diagnosing system failure modes and establishing fault tolerance boundaries.",
+            f"Analyzing cause-and-effect trends to make data-driven decisions in competitive scenarios."
+        ]
     try:
         from video_generator import generate_topic_diagram_svg, detect_visual_archetype
     except ImportError:
@@ -2167,10 +2293,17 @@ def generate_heuristic_topic_learning_studio(
     arch = detect_visual_archetype(clean_t, clean_s)
     diag_svg = generate_topic_diagram_svg(clean_t, clean_s, arch)
 
+    if is_cs and "linked list" in clean_t.lower():
+        ascii_art = "[HEAD | *] ---> [12 | *] ---> [45 | *] ---> [99 | NULL]\n                  <---        <---  (Doubly Linked)"
+        diag_desc = f"Pointer architecture showing Head anchor, node payloads, directional references (Next/Prev), and safe NULL termination."
+    else:
+        ascii_art = f"[{clean_t} State A] ---> [Mechanism Transformation] ---> [Equilibrium State B]"
+        diag_desc = f"Visual dynamic {arch.replace('_', ' ')} breakdown for {clean_t}."
+
     sec_13_diagrams = {
-        "title": f"{clean_t} Operational Architecture",
-        "description": f"Visual breakdown showing dynamic {arch.replace('_', ' ')} model for {clean_t}.",
-        "ascii_art": f"[Input State] ---> | Rule of {clean_t} | ---> [Equilibrium Output]\n         ^                      |\n         |--- Feedback Loop ----|",
+        "title": f"{clean_t} Architecture & Pointer Model" if is_cs else f"{clean_t} Operational Architecture",
+        "description": diag_desc,
+        "ascii_art": ascii_art,
         "diagram_svg": diag_svg
     }
     sec_13_points = [

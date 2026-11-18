@@ -57,7 +57,7 @@ function splitTextIntoTspans(
     .map((line, idx) => `<tspan x="${centerX}" y="${(startY + idx * lineHeight).toFixed(1)}">${line}</tspan>`)
     .join('');
 
-  return `<text x="${centerX}" fill="${fillColor}" font-size="${fontSize}" font-weight="700" font-family="system-ui, -apple-system, sans-serif" text-anchor="middle">${tspans}</text>`;
+  return `<text x="${centerX}" fill="${fillColor}" font-size="${fontSize}" font-weight="700" font-family="system-ui, -apple-system, sans-serif" text-anchor="middle" dominant-baseline="central">${tspans}</text>`;
 }
 
 function detectTopicArchetype(topicName: string = '', subjectName: string = ''): 'data_structure' | 'cycle' | 'pipeline' | 'formula' | 'concept' {
@@ -290,7 +290,7 @@ function renderFormulaSvg(topicName: string): string {
 }
 
 function renderArchitectureFlowSvg(topicName: string): string {
-  const centerTspans = splitTextIntoTspans(topicName, 360, 78, 22, 13, 17, '#FFFFFF');
+  const centerTspans = splitTextIntoTspans(topicName, 360, 84, 24, 12, 16, '#FFFFFF');
   return `<svg viewBox="0 0 720 160" width="100%" height="100%" style="max-height: 160px; display: block; margin: 0 auto;">
   <defs>
     <linearGradient id="feArchCoreGrad" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -387,14 +387,22 @@ const formatDiagramSvg = (rawSvg?: string | null, topicName: string = 'Core Conc
   const cleanT = (topicName || 'Core Concept').trim();
   const arch = detectTopicArchetype(cleanT, subjectName);
 
+  // If topic is data structure (e.g. Singly and Doubly Linked Lists), ALWAYS return the rich linked list diagram!
+  if (arch === 'data_structure') {
+    return renderLinkedListSvg(cleanT);
+  }
+
+  // If rawSvg contains broken foreignObject or old unformatted template, replace with archetype SVG
+  if (!rawSvg || rawSvg.includes('foreignObject') || rawSvg.includes('Input State') || rawSvg.includes('Input Stimulus')) {
+    if (arch === 'cycle') return renderCycleSvg(cleanT);
+    if (arch === 'pipeline') return renderPipelineSvg(cleanT);
+    if (arch === 'formula') return renderFormulaSvg(cleanT);
+    return renderArchitectureFlowSvg(cleanT);
+  }
+
   // If already clean and responsive with tspan text and 720 viewBox, return as-is
   if (rawSvg && rawSvg.includes('viewBox="0 0 720') && rawSvg.includes('<tspan')) {
     return rawSvg;
-  }
-
-  // If topic is data structure (e.g. Singly and Doubly Linked Lists), ALWAYS return the linked list diagram!
-  if (arch === 'data_structure') {
-    return renderLinkedListSvg(cleanT);
   }
 
   // If rawSvg represents concept badge
@@ -472,6 +480,11 @@ export const AILearningStudioView: React.FC<AILearningStudioViewProps> = ({
   const [lessonAudioSpeed, setLessonAudioSpeed] = useState<number>(1.0);
   const [lessonAudioVolume, setLessonAudioVolume] = useState<number>(85);
   const [lessonAudioMuted, setLessonAudioMuted] = useState<boolean>(false);
+
+  // Dynamic Topic Lessons Progression State
+  const [topicLessons, setTopicLessons] = useState<any[]>([]);
+  const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
+  const [lessonsLoading, setLessonsLoading] = useState<boolean>(false);
 
   // Section 12 Interactive Evaluation & Simplified Re-Explanation State
   const [selectedSection12Answers, setSelectedSection12Answers] = useState<Record<number, number>>({});
@@ -559,6 +572,22 @@ export const AILearningStudioView: React.FC<AILearningStudioViewProps> = ({
           ]);
         }
       } catch (err) {}
+      // Load dynamic topic lessons progression
+      try {
+        setLessonsLoading(true);
+        const lRes = await api.getTopicLessons(token, tid);
+        if (lRes && lRes.lessons) {
+          setTopicLessons(lRes.lessons);
+          if (lRes.lessons.length > 0) {
+            setSelectedLessonId(lRes.lessons[0].id);
+          }
+        }
+      } catch (err) {
+        console.warn('Failed loading lessons:', err);
+      } finally {
+        setLessonsLoading(false);
+      }
+
       // Load practice questions
       loadPracticeQuestions(tid, 'intermediate');
     } catch (e: any) {
@@ -840,6 +869,18 @@ export const AILearningStudioView: React.FC<AILearningStudioViewProps> = ({
       console.error(e);
     } finally {
       setPracticeLoading(false);
+    }
+  };
+
+  const handleToggleLesson = async (lessonId: string, currentStatus: string) => {
+    if (!token) return;
+    const nextStatus = currentStatus === 'completed' ? 'pending' : 'completed';
+    try {
+      await api.updateLessonStatus(token, lessonId, nextStatus);
+      setTopicLessons(prev => prev.map(l => l.id === lessonId ? { ...l, status: nextStatus } : l));
+      showToast(nextStatus === 'completed' ? '✓ Lesson marked completed! Great progress.' : 'Lesson reopened.');
+    } catch (e: any) {
+      showToast(e.message || 'Failed to update lesson status');
     }
   };
 
@@ -1239,6 +1280,103 @@ export const AILearningStudioView: React.FC<AILearningStudioViewProps> = ({
       {activeTab === 'learn' && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: '24px' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
+            {/* Dynamic Modular Lesson Stepper */}
+            {topicLessons && topicLessons.length > 0 && (
+              <div
+                className="card"
+                style={{
+                  padding: '18px 22px',
+                  borderRadius: '16px',
+                  background: 'var(--surface)',
+                  border: '1.5px solid var(--border)',
+                  boxShadow: '0 4px 18px rgba(0, 0, 0, 0.08)'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '18px' }}>📚</span>
+                    <div>
+                      <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 800, color: 'var(--text)' }}>
+                        Modular Lesson Progression ({topicLessons.filter(l => l.status === 'completed').length}/{topicLessons.length} Completed)
+                      </h4>
+                      <p style={{ margin: 0, fontSize: '12px', color: 'var(--muted)' }}>
+                        Structured conceptual hierarchy: Foundations → Mechanics → Edge Cases → Exam Mastery
+                      </p>
+                    </div>
+                  </div>
+                  <span
+                    className="pill good"
+                    style={{ fontSize: '11px', fontWeight: 700 }}
+                  >
+                    {Math.round((topicLessons.filter(l => l.status === 'completed').length / topicLessons.length) * 100)}% Mastered
+                  </span>
+                </div>
+
+                {/* Stepper Pills */}
+                <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '6px' }}>
+                  {topicLessons.map((les) => {
+                    const isSelected = selectedLessonId === les.id;
+                    const isDone = les.status === 'completed';
+                    return (
+                      <button
+                        key={les.id}
+                        onClick={() => setSelectedLessonId(les.id)}
+                        style={{
+                          padding: '8px 14px',
+                          borderRadius: '10px',
+                          fontSize: '12px',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          whiteSpace: 'nowrap',
+                          transition: 'all 0.15s ease',
+                          border: isSelected ? '1.5px solid #38BDF8' : '1px solid var(--border)',
+                          background: isSelected ? 'rgba(56, 189, 248, 0.15)' : isDone ? 'rgba(16, 185, 129, 0.12)' : 'var(--surface2)',
+                          color: isSelected ? '#38BDF8' : isDone ? '#10B981' : 'var(--text)'
+                        }}
+                      >
+                        <span>{isDone ? '✓' : `${les.lesson_order}.`}</span>
+                        <span>{les.title}</span>
+                        <span style={{ fontSize: '10px', opacity: 0.75 }}>({les.estimated_minutes}m)</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Selected Lesson Card Summary */}
+                {selectedLessonId && (() => {
+                  const activeLes = topicLessons.find(l => l.id === selectedLessonId) || topicLessons[0];
+                  if (!activeLes) return null;
+                  const isDone = activeLes.status === 'completed';
+                  return (
+                    <div style={{ marginTop: '14px', padding: '12px 16px', background: 'var(--surface-hover)', borderRadius: '12px', borderLeft: '3px solid #38BDF8', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                      <div style={{ flex: '1 1 300px' }}>
+                        <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text)', marginBottom: '3px' }}>
+                          🎯 Learning Objective: {activeLes.learning_objective || 'Master core foundational mechanics and boundary invariants.'}
+                        </div>
+                        {activeLes.key_concepts && activeLes.key_concepts.length > 0 && (
+                          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '6px' }}>
+                            {activeLes.key_concepts.map((kc: string, ki: number) => (
+                              <span key={ki} className="pill" style={{ fontSize: '10.5px' }}>{kc}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => handleToggleLesson(activeLes.id, activeLes.status)}
+                        className={`btn sm ${isDone ? '' : 'primary'}`}
+                        style={{ fontSize: '12px', fontWeight: 700, padding: '6px 14px' }}
+                      >
+                        {isDone ? 'Reopen Lesson' : '✓ Mark Lesson Done'}
+                      </button>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
             {/* AI Lesson Audio Reader Bar */}
             <div
               className="card"

@@ -54,7 +54,9 @@ CANONICAL_COLUMNS = [
     "topic_order",
     "difficulty",
     "estimated_minutes",
-    "importance"
+    "importance",
+    "source_page",
+    "source_ref"
 ]
 
 def clean_name(val: Any) -> str:
@@ -142,15 +144,30 @@ def detect_column_mappings(headers: List[str]) -> Dict[str, str]:
     return mapping
 
 def extract_text_from_pdf(file_bytes: bytes) -> str:
-    """Extracts raw text content using PyMuPDF (fitz) or fallback to pypdf."""
+    """Extracts raw text content using PyMuPDF (fitz) with OCR fallback for scanned pages or fallback to pypdf."""
     if HAS_PYMUPDF:
         try:
             doc = fitz.open(stream=file_bytes, filetype="pdf")
             extracted = []
             for i, page in enumerate(doc):
                 text = page.get_text("text")
-                if text and text.strip():
-                    extracted.append(f"--- Page {i+1} ---\n" + text)
+                if text and text.strip() and len(text.strip()) > 35:
+                    extracted.append(f"--- Page {i+1} ---\n" + text.strip())
+                else:
+                    # Scanned PDF page OCR fallback
+                    try:
+                        from PIL import Image
+                        import pytesseract
+                        pix = page.get_pixmap(dpi=150)
+                        img = Image.open(io.BytesIO(pix.tobytes("png")))
+                        ocr_text = pytesseract.image_to_string(img)
+                        if ocr_text and ocr_text.strip():
+                            extracted.append(f"--- Page {i+1} (OCR) ---\n" + ocr_text.strip())
+                        elif text and text.strip():
+                            extracted.append(f"--- Page {i+1} ---\n" + text.strip())
+                    except Exception as ocr_err:
+                        if text and text.strip():
+                            extracted.append(f"--- Page {i+1} ---\n" + text.strip())
             if extracted:
                 return "\n\n".join(extracted)
         except Exception as e:
@@ -161,7 +178,7 @@ def extract_text_from_pdf(file_bytes: bytes) -> str:
     for i, page in enumerate(reader.pages):
         text = page.extract_text()
         if text:
-            extracted.append(f"--- Page {i+1} ---\n" + text)
+            extracted.append(f"--- Page {i+1} ---\n" + text.strip())
     return "\n\n".join(extracted)
 
 def extract_text_from_docx(file_bytes: bytes) -> str:
@@ -476,6 +493,8 @@ def parse_and_preview_syllabus(
             "difficulty": r.get("difficulty", "medium"),
             "estimated_minutes": r.get("estimated_minutes", 45),
             "importance": r.get("importance", "medium"),
+            "source_page": r.get("source_page", "Page 1"),
+            "source_ref": r.get("source_ref", "Direct Syllabus Reference"),
             "status": status,
             "status_message": status_msg
         })
@@ -506,16 +525,23 @@ def parse_and_preview_syllabus(
     }
 
 def _parse_text_to_preview_rows(text: str, active_exam: str, fallback_subject: Optional[str]) -> List[Dict[str, Any]]:
-    """Heuristic regex parser for unstructured PDF and text outlines."""
+    """Heuristic regex parser for unstructured PDF and text outlines with page tracking."""
     lines = [line.strip() for line in text.split("\n") if line.strip()]
     rows = []
     current_subject = fallback_subject or "Core Curriculum"
     current_unit = "Unit 1: Foundations"
     current_chapter = "Chapter 1: Principles"
+    current_page = "Page 1"
 
     for line in lines:
         cleaned = line.strip()
         lower = cleaned.lower()
+
+        # Check for page boundary
+        page_match = re.match(r'^---\s*Page\s*(\d+).*?---', cleaned, re.IGNORECASE)
+        if page_match:
+            current_page = f"Page {page_match.group(1)}"
+            continue
 
         # Check for Subject header
         if any(kw in lower for kw in COMMON_SUBJECT_KEYWORDS) and (len(cleaned) < 45 or "subject:" in lower or "paper:" in lower):
@@ -552,7 +578,9 @@ def _parse_text_to_preview_rows(text: str, active_exam: str, fallback_subject: O
                     "subtopic_name": "",
                     "difficulty": "medium",
                     "estimated_minutes": 45,
-                    "importance": "medium"
+                    "importance": "medium",
+                    "source_page": current_page,
+                    "source_ref": f"{current_page}, {current_unit}"
                 })
             continue
 
@@ -570,7 +598,9 @@ def _parse_text_to_preview_rows(text: str, active_exam: str, fallback_subject: O
                         "subtopic_name": "",
                         "difficulty": "medium",
                         "estimated_minutes": 45,
-                        "importance": "medium"
+                        "importance": "medium",
+                        "source_page": current_page,
+                        "source_ref": f"{current_page}, {current_unit}"
                     })
                 continue
 
@@ -586,7 +616,9 @@ def _parse_text_to_preview_rows(text: str, active_exam: str, fallback_subject: O
                     "subtopic_name": "",
                     "difficulty": "medium",
                     "estimated_minutes": 45,
-                    "importance": "medium"
+                    "importance": "medium",
+                    "source_page": current_page,
+                    "source_ref": f"{current_page}, {current_unit}"
                 })
 
     return rows

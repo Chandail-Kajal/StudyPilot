@@ -208,7 +208,7 @@ def wrap_svg_tspans(text: str, center_x: float, center_y: float, max_chars: int 
         y_pos = round(start_y + (i * line_height), 1)
         tspans.append(f'<tspan x="{center_x}" y="{y_pos}">{line}</tspan>')
     
-    return f'<text x="{center_x}" fill="{fill}" font-size="{font_size}" font-weight="700" font-family="system-ui, -apple-system, sans-serif" text-anchor="middle">{"".join(tspans)}</text>'
+    return f'<text x="{center_x}" fill="{fill}" font-size="{font_size}" font-weight="700" font-family="system-ui, -apple-system, sans-serif" text-anchor="middle" dominant-baseline="central">{"".join(tspans)}</text>'
 
 def detect_visual_archetype(topic_name: str, subject_name: str = "") -> str:
     combined = f"{topic_name} {subject_name}".lower()
@@ -446,7 +446,7 @@ def generate_formula_derivation_svg(topic_name: str) -> str:
 </svg>"""
 
 def generate_architecture_flow_svg(topic_name: str) -> str:
-    escaped_title = wrap_svg_tspans(topic_name, 360, 78, max_chars=22, font_size=13, line_height=17, fill="#FFFFFF")
+    escaped_title = wrap_svg_tspans(topic_name, 360, 84, max_chars=24, font_size=12, line_height=16, fill="#FFFFFF")
     return f"""<svg viewBox="0 0 720 160" width="100%" height="100%" style="max-height: 160px; display: block; margin: 0 auto;">
   <defs>
     <linearGradient id="archCoreGrad" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -705,7 +705,7 @@ async def generate_educational_video_script(
                         "Conservation law invariants preserved"
                     ],
                     "diagram_type": "flowchart",
-                    "diagram_svg": "<svg viewBox='0 0 620 140'><rect x='20' y='42' width='125' height='52' rx='10' fill='#141E2A' stroke='#263648' stroke-width='1.5'/><text x='82' y='73' fill='#92A3B5' font-size='12' font-family='system-ui, sans-serif' text-anchor='middle'>Input State</text><line x1='145' y1='68' x2='195' y2='68' stroke='#54C2F0' stroke-width='2.5' stroke-dasharray='4'/><polygon points='195,68 188,64 188,72' fill='#54C2F0'/><rect x='195' y='28' width='230' height='80' rx='14' fill='#0A6C9E' stroke='#54C2F0' stroke-width='1.5'/><foreignObject x='195' y='28' width='230' height='80'><div xmlns='http://www.w3.org/1999/xhtml' style='display:flex;align-items:center;justify-content:center;height:100%;text-align:center;color:#ffffff;font-size:13px;font-weight:700;line-height:1.25;padding:6px 14px;font-family:system-ui,sans-serif;word-break:break-word;overflow:hidden;'>{clean_topic}</div></foreignObject><line x1='425' y1='68' x2='475' y2='68' stroke='#4CC98A' stroke-width='2.5'/><polygon points='475,68 468,64 468,72' fill='#4CC98A'/><rect x='475' y='42' width='125' height='52' rx='10' fill='#1B8553' stroke='#4CC98A' stroke-width='1.5'/><text x='537' y='73' fill='#ffffff' font-size='12' font-family='system-ui, sans-serif' text-anchor='middle'>Output</text></svg>"
+                    "diagram_svg": null
                 }},
                 "manim_code": null
             }},
@@ -877,6 +877,12 @@ async def generate_educational_video_script(
 
     ai_result = await ai_manager.call_llm_json(prompt, system_instruction="You are a professional educational video director. Always output valid JSON strictly adhering to schema.")
     if ai_result and "scenes" in ai_result and len(ai_result["scenes"]) > 0:
+        for sc in ai_result["scenes"]:
+            sc_diag = sc.get("slide_content", {}).get("diagram_svg", "")
+            if not sc_diag or "foreignObject" in sc_diag or "Input State" in sc_diag:
+                if "slide_content" not in sc:
+                    sc["slide_content"] = {}
+                sc["slide_content"]["diagram_svg"] = generate_topic_diagram_svg(clean_topic, clean_subj, "auto")
         return ai_result
 
     # Fallback heuristic script

@@ -720,6 +720,28 @@ export const api = {
     });
   },
 
+  async getTopicLessons(token: string, topicId: string) {
+    return request(`/api/learning/topic/${topicId}/lessons`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` }
+    });
+  },
+
+  async decomposeTopicLessons(token: string, topicId: string) {
+    return request(`/api/learning/topic/${topicId}/lessons/decompose`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` }
+    });
+  },
+
+  async updateLessonStatus(token: string, lessonId: string, status: string) {
+    return request(`/api/learning/lesson/${lessonId}/status`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ status })
+    });
+  },
+
   async updateTopicInteraction(token: string, topicId: string, payload: {
     mark_mastered?: boolean;
     comprehension_score?: number;

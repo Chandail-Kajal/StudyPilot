@@ -260,6 +260,7 @@ export const FullSyllabusTestModule: React.FC<FullSyllabusTestModuleProps> = ({
       pct = totalQuestions > 0 ? Math.round((correctCount / totalQuestions) * 100) : 0;
     }
 
+    
     const passed = pct >= 65;
     const timeSpentSecs = (durationMins * 60) - testTimeRemaining;
 

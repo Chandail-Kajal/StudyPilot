@@ -129,6 +129,24 @@ CREATE TABLE IF NOT EXISTS topics (
     INDEX idx_topics_chapter (chapter_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS topic_lessons (
+    id VARCHAR(64) PRIMARY KEY,
+    topic_id VARCHAR(64) NOT NULL,
+    lesson_order INT DEFAULT 1,
+    title VARCHAR(255) NOT NULL,
+    learning_objective TEXT NULL,
+    prerequisites TEXT NULL,
+    key_concepts TEXT NULL,
+    estimated_minutes INT DEFAULT 20,
+    difficulty VARCHAR(30) DEFAULT 'medium',
+    relationship VARCHAR(255) NULL,
+    status VARCHAR(50) DEFAULT 'pending',
+    created_at VARCHAR(100) NOT NULL,
+    updated_at VARCHAR(100) NOT NULL,
+    FOREIGN KEY (topic_id) REFERENCES topics(id) ON DELETE CASCADE,
+    INDEX idx_lessons_topic (topic_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS topic_progress (
     id VARCHAR(64) PRIMARY KEY,
     user_id VARCHAR(64) NOT NULL,
@@ -314,6 +332,7 @@ CREATE TABLE IF NOT EXISTS monthly_assessments (
 CREATE TABLE IF NOT EXISTS topic_learning_content (
     id VARCHAR(64) PRIMARY KEY,
     topic_id VARCHAR(64) NOT NULL,
+    lesson_id VARCHAR(64) NULL,
     education_level VARCHAR(64) NOT NULL,
     summary TEXT NULL,
     prerequisites LONGTEXT NULL,
@@ -321,7 +340,9 @@ CREATE TABLE IF NOT EXISTS topic_learning_content (
     interactive_elements LONGTEXT NOT NULL,
     key_takeaways LONGTEXT NULL,
     comprehension_checks LONGTEXT NULL,
+    pedagogical_content LONGTEXT NULL,
     version INT DEFAULT 1,
+    quality_score FLOAT DEFAULT 1.0,
     created_at VARCHAR(100) NOT NULL,
     updated_at VARCHAR(100) NOT NULL,
     FOREIGN KEY (topic_id) REFERENCES topics(id) ON DELETE CASCADE,

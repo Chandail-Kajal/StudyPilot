@@ -23,6 +23,7 @@ interface PlanTask {
   scheduled_date: string;
   estimated_minutes: number;
   priority?: string;
+  difficulty?: string;
   activity_type?: string;
   status: 'pending' | 'completed' | string;
   completed_at?: string | null;
@@ -51,6 +52,68 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
   const [subjectFilter, setSubjectFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [togglingTaskId, setTogglingTaskId] = useState<string | null>(null);
+  const [plannerTheme, setPlannerTheme] = useState<'emerald' | 'ocean' | 'violet' | 'amber'>(() => {
+    if (typeof window !== 'undefined') {
+      return (localStorage.getItem('studypilot_planner_theme') as any) || 'emerald';
+    }
+    return 'emerald';
+  });
+
+  const handleThemeChange = (newTheme: 'emerald' | 'ocean' | 'violet' | 'amber') => {
+    setPlannerTheme(newTheme);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('studypilot_planner_theme', newTheme);
+    }
+  };
+
+  const themePalettes = {
+    emerald: {
+      heroBg: 'linear-gradient(135deg, rgba(6, 78, 59, 0.95) 0%, rgba(4, 120, 87, 0.92) 50%, rgba(15, 23, 42, 0.96) 100%)',
+      heroBorder: 'rgba(52, 211, 153, 0.35)',
+      accent: '#10B981',
+      accentLight: '#34D399',
+      accentGlow: 'rgba(16, 185, 129, 0.25)',
+      btnGrad: 'linear-gradient(135deg, #059669 0%, #10B981 100%)',
+      tagBg: 'rgba(16, 185, 129, 0.18)',
+      tagColor: '#34D399',
+      tagBorder: 'rgba(52, 211, 153, 0.4)'
+    },
+    ocean: {
+      heroBg: 'linear-gradient(135deg, rgba(15, 23, 42, 0.96) 0%, rgba(3, 105, 161, 0.9) 60%, rgba(2, 132, 199, 0.95) 100%)',
+      heroBorder: 'rgba(56, 189, 248, 0.35)',
+      accent: '#38BDF8',
+      accentLight: '#7DD3FC',
+      accentGlow: 'rgba(56, 189, 248, 0.25)',
+      btnGrad: 'linear-gradient(135deg, #0284C7 0%, #38BDF8 100%)',
+      tagBg: 'rgba(56, 189, 248, 0.18)',
+      tagColor: '#38BDF8',
+      tagBorder: 'rgba(56, 189, 248, 0.4)'
+    },
+    violet: {
+      heroBg: 'linear-gradient(135deg, rgba(46, 16, 101, 0.96) 0%, rgba(88, 28, 135, 0.92) 55%, rgba(15, 23, 42, 0.96) 100%)',
+      heroBorder: 'rgba(192, 132, 252, 0.35)',
+      accent: '#C084FC',
+      accentLight: '#E9D5FF',
+      accentGlow: 'rgba(192, 132, 252, 0.25)',
+      btnGrad: 'linear-gradient(135deg, #7E22CE 0%, #C084FC 100%)',
+      tagBg: 'rgba(192, 132, 252, 0.18)',
+      tagColor: '#C084FC',
+      tagBorder: 'rgba(192, 132, 252, 0.4)'
+    },
+    amber: {
+      heroBg: 'linear-gradient(135deg, rgba(69, 26, 3, 0.96) 0%, rgba(180, 83, 9, 0.9) 60%, rgba(15, 23, 42, 0.96) 100%)',
+      heroBorder: 'rgba(251, 191, 36, 0.35)',
+      accent: '#F59E0B',
+      accentLight: '#FDE68A',
+      accentGlow: 'rgba(245, 158, 11, 0.25)',
+      btnGrad: 'linear-gradient(135deg, #D97706 0%, #F59E0B 100%)',
+      tagBg: 'rgba(245, 158, 11, 0.18)',
+      tagColor: '#FBBF24',
+      tagBorder: 'rgba(245, 158, 11, 0.4)'
+    }
+  };
+
+  const activeTheme = themePalettes[plannerTheme] || themePalettes.emerald;
 
   // Adaptive Plan Generator state
   const [showAdaptiveModal, setShowAdaptiveModal] = useState(false);
@@ -186,8 +249,31 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
     return palettes[hash % palettes.length];
   };
 
+  // Helper for difficulty badge
+  const getDifficultyBadge = (diff?: string) => {
+    switch ((diff || '').toLowerCase()) {
+      case 'hard':
+      case 'advanced':
+        return { label: '🔥 Hard (1.5x Time)', bg: 'rgba(239, 68, 68, 0.12)', color: '#EF4444', border: 'rgba(239, 68, 68, 0.3)' };
+      case 'medium':
+      case 'intermediate':
+        return { label: '⚡ Medium', bg: 'rgba(245, 158, 11, 0.12)', color: '#F59E0B', border: 'rgba(245, 158, 11, 0.3)' };
+      case 'easy':
+      case 'basic':
+        return { label: '🌱 Easy', bg: 'rgba(16, 185, 129, 0.12)', color: '#10B981', border: 'rgba(16, 185, 129, 0.3)' };
+      default:
+        return null;
+    }
+  };
+
   // Helper for activity type badge
-  const getActivityBadge = (type?: string) => {
+  const getActivityBadge = (type?: string, title?: string) => {
+    if (title && (title.includes('R1') || title.includes('Spaced Repetition 1'))) {
+      return { label: '🔄 R1 Spaced Revision', bg: 'rgba(251, 191, 36, 0.15)', color: '#FBBF24', border: 'rgba(251, 191, 36, 0.35)' };
+    }
+    if (title && (title.includes('R2') || title.includes('Spaced Repetition 2'))) {
+      return { label: '🔁 R2 Spaced Revision', bg: 'rgba(245, 158, 11, 0.15)', color: '#F59E0B', border: 'rgba(245, 158, 11, 0.35)' };
+    }
     switch (type?.toLowerCase()) {
       case 'class':
       case 'lesson':
@@ -223,13 +309,13 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
   return (
     <div style={{ maxWidth: '1240px', margin: '0 auto', padding: '8px 4px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
       
-      {/* 1. Hero Header Banner with Clean Slate & Sky Blue Theme */}
+      {/* 1. Hero Header Banner with Dynamic Theme Palette */}
       <div
         style={{
-          background: 'linear-gradient(135deg, rgba(20, 30, 48, 0.95) 0%, rgba(36, 59, 85, 0.95) 100%)',
+          background: activeTheme.heroBg,
           borderRadius: '20px',
           padding: '28px 32px',
-          border: '1px solid rgba(84, 194, 240, 0.25)',
+          border: `1px solid ${activeTheme.heroBorder}`,
           boxShadow: '0 12px 36px rgba(0, 0, 0, 0.35)',
           position: 'relative',
           overflow: 'hidden'
@@ -244,7 +330,7 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
             width: '240px',
             height: '240px',
             borderRadius: '50%',
-            background: 'radial-gradient(circle, rgba(56, 189, 248, 0.18) 0%, transparent 70%)',
+            background: `radial-gradient(circle, ${activeTheme.accentGlow} 0%, transparent 70%)`,
             pointerEvents: 'none'
           }}
         />
@@ -254,9 +340,9 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px', flexWrap: 'wrap' }}>
               <span
                 style={{
-                  background: 'rgba(56, 189, 248, 0.18)',
-                  color: '#38BDF8',
-                  border: '1px solid rgba(56, 189, 248, 0.4)',
+                  background: activeTheme.tagBg,
+                  color: activeTheme.tagColor,
+                  border: `1px solid ${activeTheme.tagBorder}`,
                   padding: '3px 10px',
                   borderRadius: '999px',
                   fontSize: '11px',
@@ -291,10 +377,37 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
               <span style={{ fontSize: '12px', color: '#92A3B5' }}>
                 Daily Target: <strong style={{ color: '#E8EEF4' }}>{planData?.daily_study_minutes || 120} mins</strong>
               </span>
+
+              {/* Theme Palette Switcher */}
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', marginLeft: '8px', background: 'rgba(0,0,0,0.3)', padding: '2px 8px', borderRadius: '20px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                <span style={{ fontSize: '10.5px', color: '#CBD5E1', fontWeight: 600 }}>Theme:</span>
+                {[
+                  { id: 'emerald', label: 'Emerald', color: '#10B981' },
+                  { id: 'ocean', label: 'Ocean', color: '#38BDF8' },
+                  { id: 'violet', label: 'Violet', color: '#C084FC' },
+                  { id: 'amber', label: 'Amber', color: '#F59E0B' }
+                ].map(th => (
+                  <button
+                    key={th.id}
+                    onClick={() => handleThemeChange(th.id as any)}
+                    title={`Switch to ${th.label} theme`}
+                    style={{
+                      width: '16px',
+                      height: '16px',
+                      borderRadius: '50%',
+                      background: th.color,
+                      border: plannerTheme === th.id ? '2px solid #FFFFFF' : '1px solid transparent',
+                      cursor: 'pointer',
+                      padding: 0,
+                      boxShadow: plannerTheme === th.id ? `0 0 8px ${th.color}` : 'none'
+                    }}
+                  />
+                ))}
+              </div>
             </div>
 
             <h1 style={{ fontSize: '28px', fontWeight: 800, color: '#FFFFFF', margin: '0 0 6px 0', letterSpacing: '-0.02em', display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <span style={{ color: '#38BDF8' }}>✦</span>
+              <span style={{ color: activeTheme.accent }}>✦</span>
               Personalized Study Planner: {activeExam.exam_name}
             </h1>
             <p style={{ fontSize: '14px', color: '#94A3B8', maxWidth: '640px', margin: 0, lineHeight: 1.5 }}>
@@ -307,7 +420,7 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
               onClick={() => setShowAdaptiveModal(true)}
               className="btn primary"
               style={{
-                background: 'linear-gradient(135deg, #0284C7 0%, #38BDF8 100%)',
+                background: activeTheme.btnGrad,
                 color: '#FFFFFF',
                 border: 'none',
                 fontWeight: 700,
@@ -360,6 +473,32 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
               <Icon name="refresh" size={15} className={loading ? 'animate-spin' : ''} />
             </button>
           </div>
+        </div>
+      </div>
+
+      {/* Dynamic System Feature Notice */}
+      <div
+        style={{
+          background: 'var(--surface)',
+          borderRadius: '12px',
+          padding: '12px 18px',
+          border: '1px solid var(--line)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '10px'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '13px' }}>
+          <span style={{ fontSize: '16px' }}>⚡</span>
+          <span style={{ color: 'var(--ink)' }}>
+            <strong>Adaptive Spaced Repetition Active:</strong> Hard topics receive 1.5x time weighting. Milestone reviews are scheduled on Days +3 (R1) & +10 (R2) before final mocks.
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ fontSize: '11px', color: 'var(--muted)' }}>Theme:</span>
+          <span style={{ fontSize: '11px', fontWeight: 700, color: activeTheme.accent, textTransform: 'capitalize' }}>{plannerTheme}</span>
         </div>
       </div>
 
@@ -681,7 +820,8 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
                     const isDone = task.status === 'completed';
                     const isToggling = togglingTaskId === task.id;
                     const subjStyle = getSubjectColor(task.subject_name);
-                    const actBadge = getActivityBadge(task.activity_type);
+                    const actBadge = getActivityBadge(task.activity_type, task.title);
+                    const diffBadge = getDifficultyBadge(task.difficulty);
 
                     return (
                       <div
@@ -766,6 +906,23 @@ export const StudyPlannerView: React.FC<StudyPlannerViewProps> = ({
                               >
                                 {actBadge.label}
                               </span>
+
+                              {/* Difficulty Badge */}
+                              {diffBadge && (
+                                <span
+                                  style={{
+                                    fontSize: '11px',
+                                    fontWeight: 700,
+                                    padding: '2px 8px',
+                                    borderRadius: '6px',
+                                    background: diffBadge.bg,
+                                    color: diffBadge.color,
+                                    border: `1px solid ${diffBadge.border}`
+                                  }}
+                                >
+                                  {diffBadge.label}
+                                </span>
+                              )}
                             </div>
 
                             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '12px', color: 'var(--muted)' }}>

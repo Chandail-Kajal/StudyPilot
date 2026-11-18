@@ -132,7 +132,13 @@ def generate_full_study_timetable(
         c_name = t.get("chapter_name") or "Core Section"
         diff = (t.get("difficulty") or "medium").lower()
         imp = (t.get("importance") or "medium").lower()
-        est_mins = t.get("estimated_minutes") or chunk_minutes
+        base_mins = t.get("estimated_minutes") or chunk_minutes
+        if diff in ("hard", "advanced", "complex"):
+            est_mins = max(45, int(base_mins * 1.5))
+        elif diff in ("easy", "basic", "fundamental"):
+            est_mins = max(20, int(base_mins * 0.75))
+        else:
+            est_mins = base_mins
 
         # Track for unit assessment
         u_key = f"{s_name} - {u_name}"
@@ -172,6 +178,7 @@ def generate_full_study_timetable(
             "end_time": end_t,
             "estimated_minutes": est_mins,
             "priority": "high" if imp in ("high", "very_high") else "medium",
+            "difficulty": diff,
             "activity_type": "class",
             "title": f"AI Class: {t_name}",
             "notes": learn_notes,

@@ -35,6 +35,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [scheduledTasks, setScheduledTasks] = useState<Task[]>([]);
   const [recentAttempts, setRecentAttempts] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [hubFilter, setHubFilter] = useState<'all' | 'plan' | 'learn' | 'test'>('all');
+  const [completingTaskId, setCompletingTaskId] = useState<string | null>(null);
 
   // Student Onboarding State
   const [obExamName, setObExamName] = useState('');
@@ -118,11 +120,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   const handleToggleTask = async (taskId: string) => {
     if (!token) return;
+    setCompletingTaskId(taskId);
     try {
       await api.toggleStudyTask(token, taskId);
-      setScheduledTasks(prev => prev.filter(t => t.id !== taskId));
+      setTimeout(() => {
+        setScheduledTasks(prev => prev.filter(t => t.id !== taskId));
+        setCompletingTaskId(null);
+      }, 220);
       showToast('Task marked as completed!');
     } catch (e: any) {
+      setCompletingTaskId(null);
       showToast(e.message || 'Failed to update task');
     }
   };
@@ -130,6 +137,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const daysUntilExam = activeExam?.exam_date
     ? Math.max(0, Math.ceil((new Date(activeExam.exam_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
     : null;
+
+  const getGreeting = () => {
+    const h = new Date().getHours();
+    if (h < 12) return 'Good morning';
+    if (h < 17) return 'Good afternoon';
+    return 'Good evening';
+  };
 
   if (!user || !token) {
     return (
@@ -155,62 +169,60 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   }
 
   return (
-    <div className="view-container" style={{ padding: '8px 0 32px 0', width: '100%' }}>
-      {/* Hero Welcome & Active Exam Bar */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: '28px',
-          flexWrap: 'wrap',
-          gap: '16px'
-        }}
-      >
-        <div>
-          <h1 style={{ margin: 0, fontSize: '28px', fontWeight: 800 }}>
-            Welcome back, {user ? user.name.split(' ')[0] : 'Scholar'}!
-          </h1>
-          <p style={{ margin: '4px 0 0', color: 'var(--muted)', fontSize: '14px' }}>
-            {activeExam ? `Active Goal: ${activeExam.exam_name}` : 'Select or upload an examination syllabus to get started'}
-          </p>
-        </div>
+    <div className="view-container" style={{ padding: '4px 0 36px 0', width: '100%' }}>
+      {/* Executive Interactive Hero Banner */}
+      <div className="hero-banner-pro">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '20px', position: 'relative', zIndex: 1 }}>
+          <div style={{ minWidth: 0, flex: '1 1 320px' }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', marginBottom: '10px', flexWrap: 'wrap' }}>
+              <span className="badge badge-primary" style={{ padding: '4px 10px', fontSize: '11px' }}>
+                <Icon name="sparkles" size={12} /> AI Study Command Center
+              </span>
+              {activeExam && (
+                <span className="badge badge-outline" style={{ padding: '4px 10px', fontSize: '11px', textTransform: 'capitalize' }}>
+                  {activeExam.exam_category} Target
+                </span>
+              )}
+              {daysUntilExam !== null && (
+                <span className={`badge ${daysUntilExam <= 14 ? 'badge-danger' : 'badge-success'}`} style={{ padding: '4px 10px', fontSize: '11px' }}>
+                  {daysUntilExam} days left
+                </span>
+              )}
+            </div>
+            <h1 style={{ margin: 0, fontSize: 'clamp(24px, 3vw, 32px)', fontWeight: 800, color: 'var(--ink)', lineHeight: 1.15 }}>
+              {getGreeting()}, {user ? user.name.split(' ')[0] : 'Scholar'}
+            </h1>
+            <p style={{ margin: '8px 0 0', color: 'var(--muted)', fontSize: '14.5px', maxWidth: '620px' }}>
+              {activeExam
+                ? `Focused on ${activeExam.exam_name}. ${dueTopics.length > 0 ? `${dueTopics.length} spaced revision${dueTopics.length > 1 ? 's' : ''} due today.` : 'Your revision queue is on track.'}`
+                : 'Create your target examination or upload a syllabus to generate an adaptive AI study plan.'}
+            </p>
+          </div>
 
-        {/* Exam Quick Selector Dropdown */}
-        {allExams.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <span style={{ fontSize: '13px', color: 'var(--muted)', fontWeight: 600 }}>Active Exam:</span>
-            <select
-              value={activeExam?.id || ''}
-              onChange={(e) => {
-                const found = allExams.find(ex => ex.id === e.target.value);
-                if (found) onSelectExam(found);
-              }}
-              style={{
-                padding: '8px 14px',
-                borderRadius: '8px',
-                border: '1px solid var(--border)',
-                background: 'var(--surface)',
-                color: 'var(--text)',
-                fontWeight: 600,
-                fontSize: '14px'
-              }}
-            >
-              {allExams.map(ex => (
-                <option key={ex.id} value={ex.id}>
-                  {ex.exam_name} ({ex.exam_category})
-                </option>
-              ))}
-            </select>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
             <button
-              className="btn sm primary"
-              onClick={() => onNavigate('exams')}
-              title="Manage all examinations"
+              className="btn primary"
+              onClick={() => onNavigate('ai_classes')}
+              style={{ height: '42px', padding: '0 18px', fontWeight: 700 }}
             >
-              <Icon name="layers" size={14} /> My Exams
+              <Icon name="sparkles" size={16} /> Launch AI Studio
+            </button>
+            <button
+              className="btn"
+              onClick={() => onNavigate('focus')}
+              style={{ height: '42px', padding: '0 16px' }}
+            >
+              <Icon name="zap" size={15} style={{ color: 'var(--amber)' }} /> Focus Timer
+            </button>
+            <button
+              className="btn"
+              onClick={() => onNavigate('upload_syllabus')}
+              style={{ height: '42px', padding: '0 16px' }}
+            >
+              <Icon name="upload" size={15} /> Upload Syllabus
             </button>
           </div>
-        )}
+        </div>
       </div>
 
       {/* Step 1: Student Onboarding Flow (shown when student has 0 active targets) */}
@@ -351,355 +363,408 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       )}
 
-      {/* KPI Cards Row */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-          gap: '16px',
-          marginBottom: '32px'
-        }}
-      >
-        {/* Readiness Index */}
-        <div className="card" style={{ padding: '20px', position: 'relative', overflow: 'hidden' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-            <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>
-              Exam Readiness Index
-            </span>
-            <span style={{ color: 'var(--good)' }}>
-              <Icon name="award" size={18} />
-            </span>
-          </div>
-          <div style={{ fontSize: '32px', fontWeight: 900, color: 'var(--text)' }}>
-            {stats ? `${stats.readiness_percent}%` : `${activeExam?.readiness_percent || 0}%`}
-          </div>
-          <div style={{ marginTop: '8px', width: '100%', height: '6px', background: 'var(--border)', borderRadius: '3px', overflow: 'hidden' }}>
+      {/* Interactive Visual KPI Cards Row */}
+      {(() => {
+        const readinessPct = Math.min(100, Math.max(0, stats ? stats.readiness_percent : (activeExam?.readiness_percent || 0)));
+        const masteredCount = stats ? stats.distribution.mastered : (activeExam?.mastered_count || 0);
+        const reviewingCount = stats ? stats.distribution.reviewing : (activeExam?.in_progress_count || 0);
+        const learningCount = stats ? stats.distribution.learning : 0;
+        const totalTopics = Math.max(1, stats ? stats.total_topics : (activeExam?.topics_count || 0));
+        const rawTotalTopics = stats ? stats.total_topics : (activeExam?.topics_count || 0);
+        const ringRadius = 24;
+        const ringCircumference = 2 * Math.PI * ringRadius;
+        const ringOffset = ringCircumference * (1 - readinessPct / 100);
+
+        const hubModules = [
+          {
+            id: 'ai_classes',
+            category: 'learn' as const,
+            title: 'AI Classes & Video Studio',
+            desc: 'Interactive avatar lessons, animated visual diagrams, voice narration & checks',
+            icon: 'sparkles',
+            tintBg: 'var(--accent-soft)',
+            tintColor: 'var(--accent)',
+            badge: 'Live Studio'
+          },
+          {
+            id: 'planner',
+            category: 'plan' as const,
+            title: 'AI Study Planner & Recovery',
+            desc: 'Difficulty-weighted workload distribution, spaced milestones & auto-reschedule',
+            icon: 'calendar',
+            tintBg: 'var(--amber-soft)',
+            tintColor: 'var(--amber)',
+            badge: 'Adaptive'
+          },
+          {
+            id: 'timetable',
+            category: 'plan' as const,
+            title: 'Daily & Weekly Timetable',
+            desc: 'Time-slotted study blocks with instant completion & drag-and-drop control',
+            icon: 'clock',
+            tintBg: 'rgba(14, 165, 233, 0.12)',
+            tintColor: '#0284C7',
+            badge: 'Time-Blocked'
+          },
+          {
+            id: 'manage_syllabus',
+            category: 'learn' as const,
+            title: 'Subjects & Syllabus',
+            desc: 'Multi-format OCR upload, hierarchical unit breakdown & lesson decomposition',
+            icon: 'layers',
+            tintBg: 'rgba(124, 58, 237, 0.12)',
+            tintColor: '#7C3AED',
+            badge: `${rawTotalTopics} Topics`
+          },
+          {
+            id: 'practice',
+            category: 'test' as const,
+            title: 'Practice & Assessments',
+            desc: 'Adaptive topic MCQs, numerical drills, flashcards & step-by-step explanations',
+            icon: 'check-circle',
+            tintBg: 'var(--good-soft)',
+            tintColor: 'var(--good)',
+            badge: 'Drills'
+          },
+          {
+            id: 'mock_config',
+            category: 'test' as const,
+            title: 'CBT Mock Examinations',
+            desc: 'Timed exam-hall simulator with question palette, negative marking & grading',
+            icon: 'test',
+            tintBg: 'var(--crit-soft)',
+            tintColor: 'var(--crit)',
+            badge: 'Timed CBT'
+          },
+          {
+            id: 'pyp_library',
+            category: 'test' as const,
+            title: 'Past Papers & AI Predictions',
+            desc: 'Previous-year paper archive, topic recurrence trends & AI predicted sets',
+            icon: 'file-text',
+            tintBg: 'var(--amber-soft)',
+            tintColor: 'var(--amber)',
+            badge: 'PYP Trends'
+          },
+          {
+            id: 'analytics',
+            category: 'test' as const,
+            title: 'Progress & Analytics',
+            desc: 'Retention diagnostics, subject mastery heatmaps & AI strategy insights',
+            icon: 'bar-chart',
+            tintBg: 'rgba(99, 102, 241, 0.13)',
+            tintColor: '#6366F1',
+            badge: 'Insights'
+          }
+        ];
+
+        const visibleModules = hubFilter === 'all' ? hubModules : hubModules.filter(m => m.category === hubFilter);
+
+        return (
+          <>
             <div
               style={{
-                width: `${stats ? stats.readiness_percent : (activeExam?.readiness_percent || 0)}%`,
-                height: '100%',
-                background: 'var(--good)',
-                borderRadius: '3px'
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))',
+                gap: '16px',
+                marginBottom: '28px'
               }}
-            />
-          </div>
-          <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '8px' }}>
-            Based on active topic spaced retention
-          </div>
-        </div>
+            >
+              {/* KPI 1: Exam Readiness Ring */}
+              <div className="kpi-card-pro" onClick={() => onNavigate('analytics')} role="button" tabIndex={0}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' }}>
+                  <div>
+                    <div style={{ fontSize: '11.5px', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                      Exam Readiness
+                    </div>
+                    <div className="mono" style={{ fontSize: '30px', fontWeight: 800, color: 'var(--ink)', marginTop: '6px', lineHeight: 1 }}>
+                      {readinessPct}%
+                    </div>
+                  </div>
+                  <svg width="60" height="60" viewBox="0 0 60 60" style={{ flexShrink: 0 }}>
+                    <circle cx="30" cy="30" r={ringRadius} fill="none" stroke="var(--line)" strokeWidth="5.5" />
+                    <circle
+                      cx="30"
+                      cy="30"
+                      r={ringRadius}
+                      fill="none"
+                      stroke="var(--good)"
+                      strokeWidth="5.5"
+                      strokeLinecap="round"
+                      strokeDasharray={ringCircumference}
+                      strokeDashoffset={ringOffset}
+                      transform="rotate(-90 30 30)"
+                      style={{ transition: 'stroke-dashoffset 0.6s cubic-bezier(0.22, 1, 0.36, 1)' }}
+                    />
+                  </svg>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px', color: 'var(--muted)', marginTop: '12px', paddingTop: '10px', borderTop: '1px solid var(--line)' }}>
+                  <span>Spaced retention score</span>
+                  <span style={{ color: 'var(--accent)', fontWeight: 600 }}>Analytics &rarr;</span>
+                </div>
+              </div>
 
-        {/* Days Remaining */}
-        <div className="card" style={{ padding: '20px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-            <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>
-              Countdown to Exam
-            </span>
-            <span style={{ color: 'var(--accent)' }}>
-              <Icon name="calendar" size={18} />
-            </span>
-          </div>
-          <div style={{ fontSize: '32px', fontWeight: 900, color: 'var(--text)' }}>
-            {daysUntilExam !== null ? `${daysUntilExam} Days` : 'Not Set'}
-          </div>
-          <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '14px' }}>
-            Target Date: {activeExam?.exam_date || 'Flexible'}
-          </div>
-        </div>
+              {/* KPI 2: Countdown to Exam */}
+              <div className="kpi-card-pro" onClick={() => onNavigate('planner')} role="button" tabIndex={0}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '11.5px', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    Exam Countdown
+                  </span>
+                  <span className="hub-icon-box" style={{ width: '34px', height: '34px', borderRadius: '10px', background: 'var(--accent-soft)', color: 'var(--accent)' }}>
+                    <Icon name="calendar" size={16} />
+                  </span>
+                </div>
+                <div className="mono" style={{ fontSize: '30px', fontWeight: 800, color: 'var(--ink)', marginTop: '8px', lineHeight: 1.1 }}>
+                  {daysUntilExam !== null ? `${daysUntilExam}` : '--'}{' '}
+                  <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--muted)', fontFamily: 'var(--f-body)' }}>
+                    {daysUntilExam !== null ? 'days left' : 'Not set'}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px', color: 'var(--muted)', marginTop: '14px', paddingTop: '10px', borderTop: '1px solid var(--line)' }}>
+                  <span>Target: {activeExam?.exam_date || 'Flexible'}</span>
+                  <span style={{ color: 'var(--accent)', fontWeight: 600 }}>Planner &rarr;</span>
+                </div>
+              </div>
 
-        {/* Topics Breakdown */}
-        <div className="card" style={{ padding: '20px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-            <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>
-              Mastered Topics
-            </span>
-            <span style={{ color: '#1FA095' }}>
-              <Icon name="check" size={18} />
-            </span>
-          </div>
-          <div style={{ fontSize: '32px', fontWeight: 900, color: 'var(--text)' }}>
-            {stats ? stats.distribution.mastered : (activeExam?.mastered_count || 0)}{' '}
-            <span style={{ fontSize: '18px', color: 'var(--muted)', fontWeight: 500 }}>
-              / {stats ? stats.total_topics : (activeExam?.topics_count || 0)}
-            </span>
-          </div>
-          <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '14px' }}>
-            {stats ? stats.distribution.reviewing : (activeExam?.in_progress_count || 0)} reviewing &middot; {stats ? stats.distribution.learning : 0} learning
-          </div>
-        </div>
+              {/* KPI 3: Syllabus Mastery Breakdown */}
+              <div className="kpi-card-pro" onClick={() => onNavigate('manage_syllabus')} role="button" tabIndex={0}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '11.5px', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    Syllabus Mastery
+                  </span>
+                  <span className="hub-icon-box" style={{ width: '34px', height: '34px', borderRadius: '10px', background: 'var(--good-soft)', color: 'var(--good)' }}>
+                    <Icon name="check-circle" size={16} />
+                  </span>
+                </div>
+                <div className="mono" style={{ fontSize: '30px', fontWeight: 800, color: 'var(--ink)', marginTop: '8px', lineHeight: 1.1 }}>
+                  {masteredCount}{' '}
+                  <span style={{ fontSize: '15px', color: 'var(--muted)', fontWeight: 600 }}>/ {rawTotalTopics}</span>
+                </div>
+                <div style={{ display: 'flex', gap: '3px', height: '6px', borderRadius: '99px', overflow: 'hidden', background: 'var(--surface2)', marginTop: '12px' }}>
+                  <div style={{ width: `${(masteredCount / totalTopics) * 100}%`, background: 'var(--good)', transition: 'width 0.4s ease' }} />
+                  <div style={{ width: `${(reviewingCount / totalTopics) * 100}%`, background: 'var(--accent)', transition: 'width 0.4s ease' }} />
+                  <div style={{ width: `${(learningCount / totalTopics) * 100}%`, background: 'var(--amber)', transition: 'width 0.4s ease' }} />
+                </div>
+                <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '8px' }}>
+                  {reviewingCount} reviewing &middot; {learningCount} learning
+                </div>
+              </div>
 
-        {/* Daily Focus Goal */}
-        <div className="card" style={{ padding: '20px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-            <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase' }}>
-              Daily Study Target
-            </span>
-            <span style={{ color: 'var(--amber)' }}>
-              <Icon name="focus" size={18} />
-            </span>
-          </div>
-          <div style={{ fontSize: '32px', fontWeight: 900, color: 'var(--text)' }}>
-            {user?.goal_mins || 180} <span style={{ fontSize: '18px', color: 'var(--muted)', fontWeight: 500 }}>mins</span>
-          </div>
-          <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '14px' }}>
-            Sitting capacity: {user?.sitting_capacity_mins || 45} mins per session
-          </div>
-        </div>
-      </div>
+              {/* KPI 4: Daily Focus Target */}
+              <div className="kpi-card-pro" onClick={() => onNavigate('focus')} role="button" tabIndex={0}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '11.5px', fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    Daily Study Goal
+                  </span>
+                  <span className="hub-icon-box" style={{ width: '34px', height: '34px', borderRadius: '10px', background: 'var(--amber-soft)', color: 'var(--amber)' }}>
+                    <Icon name="zap" size={16} />
+                  </span>
+                </div>
+                <div className="mono" style={{ fontSize: '30px', fontWeight: 800, color: 'var(--ink)', marginTop: '8px', lineHeight: 1.1 }}>
+                  {user?.goal_mins || 180}{' '}
+                  <span style={{ fontSize: '14px', color: 'var(--muted)', fontWeight: 600, fontFamily: 'var(--f-body)' }}>mins/day</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px', color: 'var(--muted)', marginTop: '14px', paddingTop: '10px', borderTop: '1px solid var(--line)' }}>
+                  <span>{user?.sitting_capacity_mins || 45}m focus blocks</span>
+                  <span style={{ color: 'var(--amber)', fontWeight: 600 }}>Start Timer &rarr;</span>
+                </div>
+              </div>
+            </div>
 
-      {/* Quick Action Navigation Grid */}
-      <div style={{ marginBottom: '32px' }}>
-      {/* Examination Preparation Hub & Quick Actions */}
-      <div style={{ marginBottom: '32px' }}>
-        <h2 style={{ fontSize: '18px', fontWeight: 800, marginBottom: '16px' }}>Examination Preparation Hub</h2>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
-            gap: '14px'
-          }}
-        >
-          <button
-            className="card interactive"
-            onClick={() => onNavigate('timetable')}
-            style={{
-              padding: '18px',
-              textAlign: 'left',
-              border: '1px solid var(--border)',
-              cursor: 'pointer',
-              background: 'linear-gradient(135deg, var(--surface), rgba(10, 108, 158, 0.05))'
-            }}
-          >
-            <div style={{ color: 'var(--accent)', marginBottom: '8px' }}>
-              <Icon name="clock" size={24} />
-            </div>
-            <div style={{ fontWeight: 800, fontSize: '15px', color: 'var(--ink)' }}>Daily & Weekly Timetable</div>
-            <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '4px' }}>
-              View time-slotted study sessions, mark complete & reschedule
-            </div>
-          </button>
+            {/* Interactive Examination Preparation Hub with Category Filter */}
+            <div style={{ marginBottom: '28px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '16px' }}>
+                <div>
+                  <h2 style={{ fontSize: '19px', fontWeight: 800, color: 'var(--ink)' }}>Preparation Workspace</h2>
+                  <p style={{ fontSize: '13px', color: 'var(--muted)', marginTop: '2px' }}>
+                    Jump into AI lessons, schedules, adaptive drills, or timed CBT simulations
+                  </p>
+                </div>
 
-          <button
-            className="card interactive"
-            onClick={() => onNavigate('ai_classes')}
-            style={{
-              padding: '18px',
-              textAlign: 'left',
-              border: '1px solid var(--border)',
-              cursor: 'pointer',
-              background: 'linear-gradient(135deg, var(--surface), rgba(10, 108, 158, 0.08))'
-            }}
-          >
-            <div style={{ color: 'var(--accent)', marginBottom: '8px' }}>
-              <Icon name="sparkles" size={24} />
-            </div>
-            <div style={{ fontWeight: 800, fontSize: '15px', color: 'var(--ink)' }}>AI Scheduled Classes</div>
-            <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '4px' }}>
-              Interactive lessons with in-class AI tutor, diagrams & checks
-            </div>
-          </button>
+                <div className="filter-tab-bar" role="tablist" aria-label="Filter preparation modules">
+                  {[
+                    { key: 'all', label: 'All Tools' },
+                    { key: 'plan', label: 'Plan & Schedule' },
+                    { key: 'learn', label: 'Learn with AI' },
+                    { key: 'test', label: 'Test & Analyze' }
+                  ].map((tab) => (
+                    <button
+                      key={tab.key}
+                      role="tab"
+                      aria-selected={hubFilter === tab.key}
+                      className={`filter-tab-btn ${hubFilter === tab.key ? 'active' : ''}`}
+                      onClick={() => setHubFilter(tab.key as any)}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-          <button
-            className="card interactive"
-            onClick={() => onNavigate('practice')}
-            style={{
-              padding: '18px',
-              textAlign: 'left',
-              border: '1px solid var(--border)',
-              cursor: 'pointer',
-              background: 'linear-gradient(135deg, var(--surface), rgba(27, 133, 83, 0.06))'
-            }}
-          >
-            <div style={{ color: 'var(--good)', marginBottom: '8px' }}>
-              <Icon name="check-circle" size={24} />
-            </div>
-            <div style={{ fontWeight: 800, fontSize: '15px', color: 'var(--ink)' }}>Topic Practice & Assessments</div>
-            <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '4px' }}>
-              Adaptive MCQ & numerical drills with instant solutions
-            </div>
-          </button>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+                  gap: '14px'
+                }}
+              >
+                {visibleModules.map((mod) => (
+                  <button
+                    key={mod.id}
+                    className="hub-card-pro"
+                    onClick={() => onNavigate(mod.id)}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', width: '100%' }}>
+                      <div className="hub-icon-box" style={{ background: mod.tintBg, color: mod.tintColor }}>
+                        <Icon name={mod.icon} size={22} />
+                      </div>
+                      <span className="badge badge-outline" style={{ fontSize: '10.5px' }}>{mod.badge}</span>
+                    </div>
 
-          <button
-            className="card interactive"
-            onClick={() => onNavigate('manage_syllabus')}
-            style={{
-              padding: '18px',
-              textAlign: 'left',
-              border: '1px solid var(--border)',
-              cursor: 'pointer',
-              background: 'var(--surface)'
-            }}
-          >
-            <div style={{ color: 'var(--accent)', marginBottom: '8px' }}>
-              <Icon name="layers" size={24} />
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                        <div style={{ fontWeight: 700, fontSize: '15px', color: 'var(--ink)' }}>{mod.title}</div>
+                        <span className="hub-arrow">
+                          <Icon name="arrow-right" size={16} />
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '12.5px', color: 'var(--muted)', marginTop: '5px', lineHeight: 1.45 }}>
+                        {mod.desc}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
             </div>
-            <div style={{ fontWeight: 800, fontSize: '15px', color: 'var(--ink)' }}>Subjects & Syllabus</div>
-            <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '4px' }}>
-              Hierarchical curriculum breakdown & document upload
-            </div>
-          </button>
+          </>
+        );
+      })()}
 
-          <button
-            className="card interactive"
-            onClick={() => onNavigate('mock_tests')}
-            style={{
-              padding: '18px',
-              textAlign: 'left',
-              border: '1px solid var(--border)',
-              cursor: 'pointer',
-              background: 'linear-gradient(135deg, var(--surface), rgba(194, 59, 48, 0.06))'
-            }}
-          >
-            <div style={{ color: 'var(--crit)', marginBottom: '8px' }}>
-              <Icon name="test" size={24} />
-            </div>
-            <div style={{ fontWeight: 800, fontSize: '15px', color: 'var(--ink)' }}>CBT Mock Examinations</div>
-            <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '4px' }}>
-              Timed CBT tests, question palette & instant grading
-            </div>
-          </button>
-
-          <button
-            className="card interactive"
-            onClick={() => onNavigate('pyp_library')}
-            style={{
-              padding: '18px',
-              textAlign: 'left',
-              border: '1px solid var(--border)',
-              cursor: 'pointer',
-              background: 'var(--surface)'
-            }}
-          >
-            <div style={{ color: 'var(--amber)', marginBottom: '8px' }}>
-              <Icon name="file-text" size={24} />
-            </div>
-            <div style={{ fontWeight: 800, fontSize: '15px', color: 'var(--ink)' }}>Previous-Year & Predicted Papers</div>
-            <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '4px' }}>
-              Recurrence trends & AI predicted practice papers
-            </div>
-          </button>
-
-          <button
-            className="card interactive"
-            onClick={() => onNavigate('planner')}
-            style={{
-              padding: '18px',
-              textAlign: 'left',
-              border: '1px solid var(--border)',
-              cursor: 'pointer',
-              background: 'linear-gradient(135deg, var(--surface), rgba(168, 107, 0, 0.06))'
-            }}
-          >
-            <div style={{ color: 'var(--amber)', marginBottom: '8px' }}>
-              <Icon name="calendar" size={24} />
-            </div>
-            <div style={{ fontWeight: 800, fontSize: '15px', color: 'var(--ink)' }}>AI Study Planner & Recovery</div>
-            <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '4px' }}>
-              Workload distribution & adaptive recovery replanner
-            </div>
-          </button>
-
-          <button
-            className="card interactive"
-            onClick={() => onNavigate('analytics')}
-            style={{
-              padding: '18px',
-              textAlign: 'left',
-              border: '1px solid var(--border)',
-              cursor: 'pointer',
-              background: 'var(--surface)'
-            }}
-          >
-            <div style={{ color: '#7C62D9', marginBottom: '8px' }}>
-              <Icon name="bar-chart" size={24} />
-            </div>
-            <div style={{ fontWeight: 800, fontSize: '15px', color: 'var(--ink)' }}>Progress & Analytics</div>
-            <div style={{ fontSize: '12px', color: 'var(--muted)', marginTop: '4px' }}>
-              Syllabus coverage %, accuracy & AI recommendations
-            </div>
-          </button>
-        </div>
-      </div>
-      </div>
-
-      {/* Main Two Columns: Tasks and Spaced Revision Due */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '24px' }}>
+      {/* Main Two Interactive Columns: Upcoming Tasks & Spaced Revision Queue */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '20px' }}>
         {/* Scheduled Tasks for Today */}
-        <div className="card" style={{ padding: '24px' }}>
+        <div className="card" style={{ padding: '22px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-            <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700 }}>
-              Upcoming Study Tasks
-            </h3>
-            <button className="linkbtn" onClick={() => onNavigate('planner')} style={{ fontSize: '13px' }}>
-              Open Planner &rarr;
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span className="hub-icon-box" style={{ width: '34px', height: '34px', borderRadius: '10px', background: 'var(--accent-soft)', color: 'var(--accent)' }}>
+                <Icon name="calendar" size={16} />
+              </span>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--ink)' }}>
+                  Upcoming Study Tasks
+                </h3>
+                <div style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                  {scheduledTasks.length} pending in your active queue
+                </div>
+              </div>
+            </div>
+            <button className="btn btn-sm" onClick={() => onNavigate('planner')}>
+              Planner &rarr;
             </button>
           </div>
 
           {scheduledTasks.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '32px 16px', color: 'var(--muted)' }}>
-              <Icon name="check" size={32} />
-              <p style={{ marginTop: '12px', fontSize: '14px' }}>All caught up! No pending study tasks scheduled.</p>
-              <button className="btn sm primary" onClick={() => onNavigate('planner')} style={{ marginTop: '8px' }}>
-                Schedule Topics
+            <div style={{ textAlign: 'center', padding: '32px 16px', color: 'var(--muted)', border: '1px dashed var(--line)', borderRadius: '14px', background: 'var(--surface2)' }}>
+              <div style={{ display: 'inline-flex', padding: '12px', borderRadius: '50%', background: 'var(--good-soft)', color: 'var(--good)', marginBottom: '10px' }}>
+                <Icon name="check" size={22} />
+              </div>
+              <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--ink)' }}>All caught up!</p>
+              <p style={{ fontSize: '12.5px', marginTop: '4px' }}>No pending study tasks scheduled right now.</p>
+              <button className="btn btn-sm primary" onClick={() => onNavigate('planner')} style={{ marginTop: '12px' }}>
+                Generate Study Plan
               </button>
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {scheduledTasks.map(t => (
-                <div
-                  key={t.id}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '12px',
-                    borderRadius: '8px',
-                    background: 'var(--bg)',
-                    border: '1px solid var(--border)'
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <input
-                      type="checkbox"
-                      checked={t.done}
-                      onChange={() => handleToggleTask(t.id)}
-                      style={{ cursor: 'pointer', width: '18px', height: '18px' }}
-                    />
-                    <div>
-                      <div style={{ fontSize: '14px', fontWeight: 600 }}>{t.title}</div>
-                      <div style={{ fontSize: '12px', color: 'var(--muted)' }}>
-                        {t.mins} mins &middot; Priority: <span style={{ textTransform: 'capitalize' }}>{t.prio}</span>
+              {scheduledTasks.map(t => {
+                const isCompleting = completingTaskId === t.id;
+                return (
+                  <div
+                    key={t.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '12px',
+                      padding: '12px 14px',
+                      borderRadius: '12px',
+                      background: 'var(--surface2)',
+                      border: '1px solid var(--line)',
+                      opacity: isCompleting ? 0.45 : 1,
+                      transform: isCompleting ? 'scale(0.98)' : 'none',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
+                      <button
+                        type="button"
+                        className="check"
+                        aria-checked={isCompleting || t.done ? 'true' : 'false'}
+                        onClick={() => handleToggleTask(t.id)}
+                        title="Mark task complete"
+                        style={{ flexShrink: 0 }}
+                      >
+                        <Icon name="check" size={14} />
+                      </button>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: '13.5px', fontWeight: 600, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {t.title}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: 'var(--muted)', marginTop: '3px' }}>
+                          <span className="mono">{t.mins}m</span>
+                          <span>&middot;</span>
+                          <span
+                            className={`badge ${t.prio === 'high' ? 'badge-danger' : t.prio === 'low' ? 'badge-outline' : 'badge-warning'}`}
+                            style={{ fontSize: '10px', textTransform: 'capitalize' }}
+                          >
+                            {t.prio || 'medium'}
+                          </span>
+                        </div>
                       </div>
                     </div>
+                    <button
+                      className="btn btn-sm"
+                      onClick={() => onNavigate('focus')}
+                      title="Start Pomodoro focus timer"
+                      style={{ flexShrink: 0 }}
+                    >
+                      <Icon name="play" size={12} /> Focus
+                    </button>
                   </div>
-                  <button
-                    className="btn sm"
-                    onClick={() => onNavigate('focus')}
-                    title="Start timer for this task"
-                    style={{ fontSize: '12px' }}
-                  >
-                    <Icon name="play" size={12} /> Focus
-                  </button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
 
-        {/* Spaced Revision Due Alerts */}
-        <div className="card" style={{ padding: '24px' }}>
+        {/* Spaced Revision Due Queue */}
+        <div className="card" style={{ padding: '22px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-            <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700 }}>
-              Spaced Revision Queue
-            </h3>
-            <button className="linkbtn" onClick={() => onNavigate('smart_revision')} style={{ fontSize: '13px' }}>
-              View Queue &rarr;
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span className="hub-icon-box" style={{ width: '34px', height: '34px', borderRadius: '10px', background: 'var(--good-soft)', color: 'var(--good)' }}>
+                <Icon name="brain" size={16} />
+              </span>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: 'var(--ink)' }}>
+                  Spaced Revision Queue
+                </h3>
+                <div style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                  Active memory retention ladder
+                </div>
+              </div>
+            </div>
+            <button className="btn btn-sm" onClick={() => onNavigate('smart_revision')}>
+              Full Queue &rarr;
             </button>
           </div>
 
           {dueTopics.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '32px 16px', color: 'var(--muted)' }}>
-              <Icon name="award" size={32} />
-              <p style={{ marginTop: '12px', fontSize: '14px' }}>Your retention ladder is fresh. No revisions due today!</p>
+            <div style={{ textAlign: 'center', padding: '32px 16px', color: 'var(--muted)', border: '1px dashed var(--line)', borderRadius: '14px', background: 'var(--surface2)' }}>
+              <div style={{ display: 'inline-flex', padding: '12px', borderRadius: '50%', background: 'var(--accent-soft)', color: 'var(--accent)', marginBottom: '10px' }}>
+                <Icon name="award" size={22} />
+              </div>
+              <p style={{ fontSize: '14px', fontWeight: 600, color: 'var(--ink)' }}>Retention ladder is fresh</p>
+              <p style={{ fontSize: '12.5px', marginTop: '4px' }}>No spaced revisions are due today.</p>
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -710,28 +775,46 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
-                    padding: '12px',
-                    borderRadius: '8px',
-                    background: 'var(--bg)',
-                    border: '1px solid var(--border)'
+                    gap: '12px',
+                    padding: '12px 14px',
+                    borderRadius: '12px',
+                    background: 'var(--surface2)',
+                    border: '1px solid var(--line)'
                   }}
                 >
-                  <div>
-                    <div style={{ fontSize: '14px', fontWeight: 600 }}>{top.topic_name}</div>
-                    <div style={{ fontSize: '12px', color: 'var(--muted)' }}>
-                      <span style={{ color: top.subject_color || 'var(--accent)', fontWeight: 600 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: '13.5px', fontWeight: 600, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {top.topic_name}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', fontSize: '11.5px', color: 'var(--muted)', marginTop: '4px' }}>
+                      <span style={{ color: top.subject_color || 'var(--accent)', fontWeight: 700 }}>
                         {top.subject_name}
                       </span>
-                      {' '}&middot; Stage {top.stage}/5 &middot; Due: {top.next_revision_date}
+                      <span className="stage-dots" title={`Retention Stage ${top.stage} of 5`}>
+                        {[1, 2, 3, 4, 5].map(step => (
+                          <span key={step} className={`stage-dot ${step <= (top.stage || 0) ? 'filled' : ''}`} />
+                        ))}
+                      </span>
+                      <span className="mono">{top.next_revision_date}</span>
                     </div>
                   </div>
-                  <button
-                    className="btn sm primary"
-                    onClick={() => onNavigate('smart_revision')}
-                    style={{ fontSize: '12px' }}
-                  >
-                    Revise
-                  </button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                    {onOpenTopicInStudio && (
+                      <button
+                        className="btn btn-sm"
+                        onClick={() => onOpenTopicInStudio(top.topic_id)}
+                        title="Open interactive AI Lesson & Video Studio"
+                      >
+                        <Icon name="sparkles" size={12} /> Studio
+                      </button>
+                    )}
+                    <button
+                      className="btn btn-sm primary"
+                      onClick={() => onNavigate('smart_revision')}
+                    >
+                      Revise
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>

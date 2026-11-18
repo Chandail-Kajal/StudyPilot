@@ -1,11 +1,13 @@
 import sqlite3
 import os
 import json
-import hashlib
-import secrets
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from dotenv import load_dotenv
+try:
+    from shared.utils import hash_password, verify_password
+except ImportError:
+    from backend.shared.utils import hash_password, verify_password
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
@@ -874,21 +876,6 @@ def init_db():
 
     conn.commit()
     conn.close()
-
-def hash_password(password: str, salt: str = None) -> tuple[str, str]:
-    if not salt:
-        salt = secrets.token_hex(16)
-    pwd_hash = hashlib.pbkdf2_hmac(
-        "sha256",
-        password.encode("utf-8"),
-        salt.encode("utf-8"),
-        100000
-    ).hex()
-    return pwd_hash, salt
-
-def verify_password(password: str, salt: str, expected_hash: str) -> bool:
-    pwd_hash, _ = hash_password(password, salt)
-    return secrets.compare_digest(pwd_hash, expected_hash)
 
 def generate_default_plan(exam_name="Target Examination", exam_date=None, goal_mins=180, role="competitive_exam", include_sample=False):
     today_dt = datetime.now()
